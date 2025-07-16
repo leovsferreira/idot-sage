@@ -4,11 +4,11 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { TextField, Select, MenuItem, FormControl, InputLabel, Button, Box } from '@mui/material';
+import { TextField, Select, MenuItem, FormControl, InputLabel, Button, Box, Checkbox, FormControlLabel, FormGroup } from '@mui/material';
 import dayjs from 'dayjs';
 import axios from 'axios';
 
-const LateralMenu = ({ activeTab, setActiveTab, onQueryResults }) => {
+const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, selectedModels }) => {
   const [startDate, setStartDate] = useState(dayjs());
   const [endDate, setEndDate] = useState(dayjs());
   const [startTime, setStartTime] = useState(null);
@@ -24,7 +24,8 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults }) => {
         endDate: endDate.format('YYYY-MM-DD'),
         startTime: startTime ? startTime.format('HH:mm') : null,
         endTime: endTime ? endTime.format('HH:mm') : null,
-        node: selectedNode
+        node: selectedNode,
+        models: selectedModels
       };
 
       const response = await axios.post('/api/query', queryData);
@@ -37,6 +38,10 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleModelToggle = (model) => {
+    onModelChange(model);
   };
 
   return (
@@ -63,6 +68,29 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults }) => {
               <h3>Filters</h3>
               
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {/* Model Selection */}
+                <FormControl component="fieldset" variant="standard">
+                  <InputLabel sx={{ position: 'static', transform: 'none', marginBottom: 1 }}>
+                    Detection Models
+                  </InputLabel>
+                  <FormGroup>
+                    {['YOLOv5n', 'YOLOv8n', 'YOLOv10n'].map((model) => (
+                      <FormControlLabel
+                        key={model}
+                        control={
+                          <Checkbox 
+                            checked={selectedModels.includes(model)}
+                            onChange={() => handleModelToggle(model)}
+                            name={model}
+                            size="small"
+                          />
+                        }
+                        label={model}
+                      />
+                    ))}
+                  </FormGroup>
+                </FormControl>
+
                 {/* Date Range */}
                 <DatePicker
                   label="Start Date"
@@ -111,7 +139,7 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults }) => {
                 <Button
                   variant="contained"
                   onClick={handleQuery}
-                  disabled={loading}
+                  disabled={loading || selectedModels.length === 0}
                   sx={{ 
                     backgroundColor: COLORS.beige,
                     color: '#333',
