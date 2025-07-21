@@ -17,44 +17,108 @@ CORS(app)
 SAGE_USERNAME = os.getenv('SAGE_USERNAME')
 SAGE_ACCESS_TOKEN = os.getenv('SAGE_ACCESS_TOKEN')
 
-# Simulate model results for demo
-def simulate_model_results():
-    classes = ['car', 'person', 'traffic light', 'bus', 'truck', 'bicycle']
-    models = ['YOLOv5n', 'YOLOv8n', 'YOLOv10n']
+def filter_data_by_time(df, start_time=None, end_time=None):
+    """Apply client-side time filtering to the dataframe after querying"""
+    if start_time is None and end_time is None:
+        return df
     
-    results = {}
-    for model in models:
-        if random.random() > 0.3:
-            num_detections = random.randint(1, 5)
-            detections = []
-            counts = {}
+    if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    df_times = df['timestamp'].dt.time
+    
+    if start_time and end_time:
+        start_time_obj = datetime.strptime(start_time, '%H:%M').time()
+        end_time_obj = datetime.strptime(end_time, '%H:%M').time()
+        
+        if start_time_obj <= end_time_obj:
+            mask = (df_times >= start_time_obj) & (df_times <= end_time_obj)
+        else:
+            mask = (df_times >= start_time_obj) | (df_times <= end_time_obj)
+    elif start_time:
+        start_time_obj = datetime.strptime(start_time, '%H:%M').time()
+        mask = df_times >= start_time_obj
+    elif end_time:
+        end_time_obj = datetime.strptime(end_time, '%H:%M').time()
+        mask = df_times <= end_time_obj
+    
+    return df[mask]
+
+def extract_timestamp_from_url(url):
+    """Extract timestamp from image URL"""
+    import re
+    match = re.search(r'/(\d+)-snapshot\.jpg$', url)
+    if match:
+        return int(match.group(1))
+    return None
+
+def create_image_records(upload_df, detection_df, selected_models):
+    """Create merged image records with detection data"""
+    images = []
+    
+    detection_lookup = {}
+    
+    for _, det_row in detection_df.iterrows():
+        try:
+            detection_data = json.loads(det_row['value'])
+            image_timestamp_ns = detection_data.get('image_timestamp_ns')
+            if image_timestamp_ns:
+                filtered_models = {
+                    model: results for model, results in detection_data.get('models_results', {}).items()
+                    if model in selected_models
+                }
+                if filtered_models:
+                    detection_lookup[image_timestamp_ns] = {
+                        'models_results': filtered_models,
+                        'detection_timestamp': det_row['timestamp']
+                    }
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Error parsing detection data: {e}")
+            continue
+    
+    print(f"Built detection lookup with {len(detection_lookup)} entries")
+    
+    for _, upload_row in upload_df.iterrows():
+        url_timestamp = extract_timestamp_from_url(upload_row['value'])
+        
+        if url_timestamp and url_timestamp in detection_lookup:
+            detection_info = detection_lookup[url_timestamp]
             
-            for _ in range(num_detections):
-                cls = random.choice(classes)
-                confidence = random.uniform(0.3, 0.95)
-                
-                x1 = random.uniform(100, 1500)
-                y1 = random.uniform(100, 800)
-                width = random.uniform(50, 200)
-                height = random.uniform(50, 200)
-                
-                detections.append({
-                    "class": cls,
-                    "confidence": confidence,
-                    "bbox": [x1, y1, x1 + width, y1 + height]
-                })
-                
-                counts[cls] = counts.get(cls, 0) + 1
-            
-            results[model] = {
-                "model": model,
-                "detections": detections,
-                "counts": counts,
-                "total_objects": num_detections,
-                "inference_time_seconds": random.uniform(1.5, 2.5)
+            image_record = {
+                'url': upload_row['value'],
+                'timestamp': upload_row['timestamp'].isoformat() if hasattr(upload_row['timestamp'], 'isoformat') else str(upload_row['timestamp']),
+                'node': upload_row['meta.vsn'],
+                'filename': upload_row.get('meta.filename', 'snapshot.jpg'),
+                'image_timestamp_ns': url_timestamp,
+                'models_results': detection_info['models_results'],
+                'meta': {
+                    'host': upload_row['meta.host'],
+                    'job': upload_row['meta.job'],
+                    'plugin': upload_row['meta.plugin'],
+                    'task': upload_row['meta.task'],
+                    'zone': upload_row['meta.zone']
+                }
             }
+            images.append(image_record)
+        else:
+            image_record = {
+                'url': upload_row['value'],
+                'timestamp': upload_row['timestamp'].isoformat() if hasattr(upload_row['timestamp'], 'isoformat') else str(upload_row['timestamp']),
+                'node': upload_row['meta.vsn'],
+                'filename': upload_row.get('meta.filename', 'snapshot.jpg'),
+                'image_timestamp_ns': url_timestamp or 0,
+                'models_results': {},
+                'meta': {
+                    'host': upload_row['meta.host'],
+                    'job': upload_row['meta.job'],
+                    'plugin': upload_row['meta.plugin'],
+                    'task': upload_row['meta.task'],
+                    'zone': upload_row['meta.zone']
+                }
+            }
+            images.append(image_record)
     
-    return results
+    return images
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -68,24 +132,19 @@ def handle_query():
         start_date = data.get('startDate')
         end_date = data.get('endDate')
         start_time = data.get('startTime')
-        end_time = data.get('endTime') 
+        end_time = data.get('endTime')
         node = data.get('node')
         models = data.get('models', ['YOLOv8n'])
         
-        if start_time:
-            start = f"{start_date}T{start_time}:00Z"
-        else:
-            start = f"{start_date}T00:00:00Z"
-            
-        if end_time:
-            end = f"{end_date}T{end_time}:59Z"
-        else:
-            end = f"{end_date}T23:59:59Z"
+        start = f"{start_date}T00:00:00Z"
+        end = f"{end_date}T23:59:59Z"
         
         filter_params = {
-            "plugin": ".*multithread-sage-idot:1.0.0",
+            "plugin": ".*multithread-sage-idot:1.1.0",
             "vsn": node
         }
+        
+        print(f"Querying with: start={start}, end={end}, filter={filter_params}")
         
         df = sage_data_client.query(
             start=start,
@@ -94,19 +153,25 @@ def handle_query():
         )
         
         if not df.empty:
-            upload_df = df[df['name'] == 'upload'].copy()
+            print(f"Raw data received: {len(df)} records")
             
-            images = []
-            for idx, row in upload_df.iterrows():
-                image_data = {
-                    'url': row['value'],
-                    'timestamp': row['timestamp'].isoformat() if hasattr(row['timestamp'], 'isoformat') else str(row['timestamp']),
-                    'node': row['meta.vsn'],
-                    'filename': row.get('meta.filename', 'snapshot.jpg'),
-                    'image_timestamp_ns': int(row['timestamp'].timestamp() * 1e9) if hasattr(row['timestamp'], 'timestamp') else 0,
-                    'models_results': simulate_model_results()
-                }
-                images.append(image_data)
+            filtered_df = filter_data_by_time(df, start_time, end_time)
+            print(f"After time filtering: {len(filtered_df)} records")
+            
+            detection_df = filtered_df[filtered_df['name'] == 'object.detections.all'].copy()
+            upload_df = filtered_df[filtered_df['name'] == 'upload'].copy()
+            
+            print(f"Detection records: {len(detection_df)}")
+            print(f"Upload records: {len(upload_df)}")
+            
+            if len(filtered_df) > 0:
+                min_date = filtered_df['timestamp'].min()
+                max_date = filtered_df['timestamp'].max()
+                print(f"Filtered data date range: {min_date} to {max_date}")
+            
+            images = create_image_records(upload_df, detection_df, models)
+            
+            images.sort(key=lambda x: x['timestamp'])
             
             return jsonify({
                 "success": True,
@@ -115,46 +180,38 @@ def handle_query():
                 "query": {
                     "start": start,
                     "end": end,
+                    "start_time": start_time,
+                    "end_time": end_time,
                     "node": node,
                     "models": models
+                },
+                "stats": {
+                    "raw_records": len(df),
+                    "after_time_filter": len(filtered_df),
+                    "detection_records": len(detection_df),
+                    "upload_records": len(upload_df),
+                    "final_images": len(images)
                 }
             })
         else:
-            demo_images = []
-            current_time = datetime.fromisoformat(start_date)
-            end_time = datetime.fromisoformat(end_date)
-            
-            while current_time <= end_time:
-                num_images = random.randint(10, 20)
-                for _ in range(num_images):
-                    hour = random.randint(0, 23)
-                    minute = random.randint(0, 59)
-                    timestamp = current_time.replace(hour=hour, minute=minute)
-                    
-                    demo_images.append({
-                        'url': f'https://example.com/image_{timestamp.timestamp()}.jpg',
-                        'timestamp': timestamp.isoformat(),
-                        'node': node,
-                        'filename': f'snapshot_{timestamp.timestamp()}.jpg',
-                        'image_timestamp_ns': int(timestamp.timestamp() * 1e9),
-                        'models_results': simulate_model_results()
-                    })
-                
-                current_time = current_time.replace(hour=0, minute=0) + pd.Timedelta(days=1)
-            
+            print("No data found, returning empty results")
             return jsonify({
                 "success": True,
-                "images": demo_images,
-                "total": len(demo_images),
+                "images": [],
+                "total": 0,
+                "message": "No data found for the specified criteria",
                 "query": {
                     "start": start,
                     "end": end,
+                    "start_time": start_time,
+                    "end_time": end_time,
                     "node": node,
                     "models": models
                 }
             })
             
     except Exception as e:
+        print(f"Query error: {str(e)}")
         return jsonify({
             "success": False,
             "error": str(e)

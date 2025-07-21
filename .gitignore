@@ -64,3 +64,7 @@ frontend/.env.production.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# test data files
+sample.csv
+test.ipynb

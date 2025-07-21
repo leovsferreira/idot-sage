@@ -22,9 +22,14 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       if (!image.models_results) return;
       
       const date = new Date(image.timestamp);
-      const dayKey = date.toISOString().split('T')[0];
-      const hour = date.getHours();
-      const minutes = date.getMinutes();
+      
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const dayKey = `${year}-${month}-${day}`;
+      
+      const hour = date.getUTCHours();
+      const minutes = date.getUTCMinutes();
       const hourFloat = hour + minutes / 60;
       
       if (!dataByDay[dayKey]) {
@@ -40,7 +45,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             detections: image.models_results[model].detections || [],
             counts: image.models_results[model].counts || {},
             totalObjects: image.models_results[model].total_objects || 0,
-            inferenceTime: image.models_results[model].inference_time_seconds || 0
+            inferenceTime: image.models_results[model].inference_time_seconds || 0,
+            imageUrl: image.url
           });
         }
       });
@@ -50,57 +56,51 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   };
 
   useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const { width } = containerRef.current.getBoundingClientRect();
-        setDimensions({ width, height: window.innerHeight * 0.3 });
-      }
-    };
+    if (!containerRef.current || images.length === 0 || selectedModels.length === 0) return;
 
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
-  }, []);
-
-  useEffect(() => {
-    if (!svgRef.current || images.length === 0 || selectedModels.length === 0) return;
+    const container = containerRef.current;
+    const containerRect = container.getBoundingClientRect();
+    const width = containerRect.width - 40;
+    const height = Math.max(200, containerRect.height - 80);
+    
+    setDimensions({ width, height });
 
     const dataByDay = processData();
     const days = Object.keys(dataByDay).sort();
     
-    const margin = { top: 40, right: 20, bottom: 20, left: 100 };
-    const width = dimensions.width - margin.left - margin.right;
-    const height = dimensions.height - margin.top - margin.bottom;
-    
-    d3.select(svgRef.current).selectAll('*').remove();
-    
+    if (days.length === 0) return;
+
+    d3.select(svgRef.current).selectAll("*").remove();
+
     const svg = d3.select(svgRef.current)
-      .attr('width', dimensions.width)
-      .attr('height', dimensions.height);
-    
+      .attr('width', width)
+      .attr('height', height);
+
+    const margin = { top: 30, right: 20, bottom: 20, left: 100 };
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+
     const g = svg.append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
-    
+
     const xScale = d3.scaleLinear()
       .domain([0, 24])
-      .range([0, width * zoomLevel]);
-    
+      .range([0, innerWidth]);
+
     const yScale = d3.scaleBand()
       .domain(days)
-      .range([0, height])
-      .padding(0.3);
-    
-    const maxObjects = d3.max(Object.values(dataByDay).flat(), d => d.totalObjects) || 10;
+      .range([0, innerHeight])
+      .padding(0.2);
+
     const thicknessScale = d3.scaleLinear()
-      .domain([0, maxObjects])
-      .range([2, yScale.bandwidth()]);
-    
+      .domain([0, d3.max(Object.values(dataByDay).flat(), d => d.totalObjects)])
+      .range([2, Math.min(yScale.bandwidth(), 20)]);
+
     const zoomContainer = g.append('g')
       .attr('class', 'zoom-container');
     
-    // Add time scale axis
     const xAxis = d3.axisTop(xScale)
-      .tickValues(d3.range(0, 25, 1))
+      .tickValues(d3.range(0, 25, 2))
       .tickFormat(d => `${d.toString().padStart(2, '0')}:00`);
     
     g.append('g')
@@ -119,14 +119,28 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .attr('text-anchor', 'end')
       .attr('alignment-baseline', 'middle')
       .style('font-size', '12px')
-      .text(d => new Date(d).toLocaleDateString());
+      .style('font-weight', 'bold')
+      .style('fill', '#2c3e50')
+      .text(d => {
+        const parts = d.split('-');
+        const year = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1;
+        const day = parseInt(parts[2]);
+        const date = new Date(Date.UTC(year, month, day));
+        
+        return date.toLocaleDateString('en-US', { 
+          timeZone: 'UTC',
+          month: 'short', 
+          day: 'numeric'
+        });
+      });
     
     days.forEach(day => {
       const dayData = dataByDay[day];
       
       zoomContainer.append('line')
         .attr('x1', 0)
-        .attr('x2', width * zoomLevel)
+        .attr('x2', innerWidth)
         .attr('y1', yScale(day) + yScale.bandwidth() / 2)
         .attr('y2', yScale(day) + yScale.bandwidth() / 2)
         .attr('stroke', '#e0e0e0')
@@ -150,7 +164,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             
             const content = `
               Model: ${detection.model}
-              Time: ${new Date(detection.timestamp).toLocaleString()}
+              Time: ${new Date(detection.timestamp).toLocaleString('en-US', { 
+                timeZone: 'UTC', 
+                hour12: false 
+              })} UTC
               Detected: ${classes || 'None'}
               Total Objects: ${detection.totalObjects}
               Inference Time: ${detection.inferenceTime.toFixed(2)}s
@@ -169,10 +186,20 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       });
     });
     
+    for (let hour = 0; hour <= 24; hour += 4) {
+      zoomContainer.append('line')
+        .attr('x1', xScale(hour))
+        .attr('x2', xScale(hour))
+        .attr('y1', 0)
+        .attr('y2', innerHeight)
+        .attr('stroke', '#f0f0f0')
+        .attr('stroke-width', 1);
+    }
+    
     const zoom = d3.zoom()
       .scaleExtent([1, 10])
-      .translateExtent([[0, 0], [width * 10, height]])
-      .extent([[0, 0], [width, height]])
+      .translateExtent([[0, 0], [innerWidth * 10, innerHeight]])
+      .extent([[0, 0], [innerWidth, innerHeight]])
       .on('zoom', (event) => {
         zoomContainer.attr('transform', event.transform);
         setZoomLevel(event.transform.k);
@@ -180,7 +207,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         const newXScale = event.transform.rescaleX(xScale);
         g.select('.x-axis').call(
           d3.axisTop(newXScale)
-            .tickValues(d3.range(0, 25, Math.max(1, Math.floor(1 / event.transform.k))))
+            .tickValues(d3.range(0, 25, Math.max(1, Math.floor(2 / event.transform.k))))
             .tickFormat(d => `${d.toString().padStart(2, '0')}:00`)
         );
       });
@@ -200,6 +227,12 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     
   }, [images, dimensions, selectedModels, zoomLevel]);
 
+  const totalImages = images.length;
+  const dateRange = images.length > 0 ? {
+    start: new Date(Math.min(...images.map(img => new Date(img.timestamp)))),
+    end: new Date(Math.max(...images.map(img => new Date(img.timestamp))))
+  } : null;
+
   return (
     <div 
       ref={containerRef}
@@ -210,7 +243,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         borderRadius: '12px',
         padding: '20px',
         position: 'relative',
-        overflow: 'auto'
+        overflow: 'hidden'
       }}
     >
       <div className="timeline-header" style={{ marginBottom: '10px' }}>
@@ -218,54 +251,71 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           Timeline Visualization
         </h2>
         <div style={{ fontSize: '0.8rem', color: '#5a6c7d', marginTop: '5px' }}>
-          Hold Shift + Scroll to zoom • {selectedModels.length} model{selectedModels.length !== 1 ? 's' : ''} selected
+          {totalImages} images • {selectedModels.length} model{selectedModels.length !== 1 ? 's' : ''} • 
+          {dateRange && (
+            <span>
+              {dateRange.start.toLocaleDateString('en-US', { timeZone: 'UTC' })} - {dateRange.end.toLocaleDateString('en-US', { timeZone: 'UTC' })} (UTC)
+            </span>
+          )}
+          <br/>
+          Hold Shift + Scroll to zoom
         </div>
       </div>
       
-      <svg ref={svgRef}></svg>
-      
-      {/* Model Legend */}
-      <div style={{ 
-        position: 'absolute', 
-        bottom: '10px', 
-        right: '10px',
-        background: 'rgba(255, 255, 255, 0.9)',
-        padding: '10px',
-        borderRadius: '8px',
-        fontSize: '0.8rem'
-      }}>
-        {selectedModels.map(model => (
-          <div key={model} style={{ display: 'flex', alignItems: 'center', marginBottom: '5px' }}>
-            <div style={{
-              width: '20px',
-              height: '10px',
-              backgroundColor: modelColors[model],
-              marginRight: '8px',
-              borderRadius: '2px'
-            }}></div>
-            <span>{model}</span>
-          </div>
-        ))}
-      </div>
+      <svg 
+        ref={svgRef}
+        style={{ 
+          width: '100%', 
+          height: 'calc(100% - 50px)',
+          cursor: 'grab'
+        }}
+      />
       
       {/* Tooltip */}
       {tooltip.visible && (
-        <div style={{
-          position: 'fixed',
-          left: tooltip.x,
-          top: tooltip.y,
-          background: 'rgba(0, 0, 0, 0.9)',
-          color: 'white',
-          padding: '10px',
-          borderRadius: '6px',
-          fontSize: '0.8rem',
-          pointerEvents: 'none',
-          whiteSpace: 'pre-line',
-          zIndex: 1000
-        }}>
+        <div
+          style={{
+            position: 'fixed',
+            left: tooltip.x,
+            top: tooltip.y,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            color: 'white',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            whiteSpace: 'pre-line',
+            pointerEvents: 'none',
+            zIndex: 1000,
+            maxWidth: '200px'
+          }}
+        >
           {tooltip.content}
         </div>
       )}
+      
+      {/* Model Legend */}
+      <div style={{ 
+        position: 'absolute',
+        bottom: '10px',
+        right: '10px',
+        display: 'flex',
+        gap: '10px',
+        fontSize: '11px'
+      }}>
+        {selectedModels.map(model => (
+          <div key={model} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div 
+              style={{
+                width: '12px',
+                height: '12px',
+                backgroundColor: modelColors[model],
+                borderRadius: '2px'
+              }}
+            />
+            <span style={{ color: '#5a6c7d' }}>{model}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

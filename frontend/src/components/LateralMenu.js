@@ -4,7 +4,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { TextField, Select, MenuItem, FormControl, InputLabel, Button, Box, Checkbox, FormControlLabel, FormGroup } from '@mui/material';
+import { TextField, Select, MenuItem, FormControl, InputLabel, Button, Box, Checkbox, FormControlLabel, FormGroup, Alert } from '@mui/material';
 import dayjs from 'dayjs';
 import axios from 'axios';
 
@@ -15,9 +15,12 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
   const [endTime, setEndTime] = useState(null);
   const [selectedNode, setSelectedNode] = useState('W042');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleQuery = async () => {
     setLoading(true);
+    setError(null);
+    
     try {
       const queryData = {
         startDate: startDate.format('YYYY-MM-DD'),
@@ -28,13 +31,23 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
         models: selectedModels
       };
 
+      console.log('Sending query:', queryData);
       const response = await axios.post('/api/query', queryData);
       
       if (response.data.success) {
         onQueryResults(response.data.images);
+        
+        console.log('Query successful:', {
+          total: response.data.total,
+          stats: response.data.stats,
+          images: response.data.images.length
+        });
+      } else {
+        setError(response.data.error || 'Query failed');
       }
     } catch (error) {
       console.error('Query error:', error);
+      setError(error.response?.data?.error || error.message || 'Network error');
     } finally {
       setLoading(false);
     }
@@ -42,6 +55,15 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
 
   const handleModelToggle = (model) => {
     onModelChange(model);
+  };
+
+  const getTimeRangeDescription = () => {
+    if (!startTime && !endTime) {
+      return "All day (no time filter)";
+    }
+    const start = startTime ? startTime.format('HH:mm') : '00:00';
+    const end = endTime ? endTime.format('HH:mm') : '23:59';
+    return `${start} - ${end}`;
   };
 
   return (
@@ -67,10 +89,16 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
             <div className="filter-content">
               <h3>Filters</h3>
               
+              {error && (
+                <Alert severity="error" sx={{ mb: 2, fontSize: '0.8rem' }}>
+                  {error}
+                </Alert>
+              )}
+              
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {/* Model Selection */}
                 <FormControl component="fieldset" variant="standard">
-                  <InputLabel sx={{ position: 'static', transform: 'none', marginBottom: 1 }}>
+                  <InputLabel sx={{ position: 'static', transform: 'none', marginBottom: 1, fontSize: '0.9rem' }}>
                     Detection Models
                   </InputLabel>
                   <FormGroup>
@@ -85,10 +113,24 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
                             size="small"
                           />
                         }
-                        label={model}
+                        label={<span style={{ fontSize: '0.85rem' }}>{model}</span>}
                       />
                     ))}
                   </FormGroup>
+                </FormControl>
+
+                {/* Node Selection */}
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Node</InputLabel>
+                  <Select
+                    value={selectedNode}
+                    label="Node"
+                    onChange={(e) => setSelectedNode(e.target.value)}
+                  >
+                    <MenuItem value="W042">W042</MenuItem>
+                    <MenuItem value="W043">W043</MenuItem>
+                    <MenuItem value="W044">W044</MenuItem>
+                  </Select>
                 </FormControl>
 
                 {/* Date Range */}
@@ -121,54 +163,46 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
                   slotProps={{ textField: { size: 'small', fullWidth: true } }}
                 />
 
-                {/* Node Selection */}
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Node</InputLabel>
-                  <Select
-                    value={selectedNode}
-                    label="Node"
-                    onChange={(e) => setSelectedNode(e.target.value)}
-                  >
-                    <MenuItem value="W042">W042</MenuItem>
-                    <MenuItem value="W065">W065</MenuItem>
-                    <MenuItem value="W06E">W06E</MenuItem>
-                  </Select>
-                </FormControl>
-
-                {/* Query Button */}
                 <Button
                   variant="contained"
                   onClick={handleQuery}
                   disabled={loading || selectedModels.length === 0}
-                  sx={{ 
-                    backgroundColor: COLORS.beige,
-                    color: '#333',
+                  sx={{
+                    backgroundColor: COLORS.purple,
                     '&:hover': {
-                      backgroundColor: COLORS.beige,
+                      backgroundColor: COLORS.purple,
                       opacity: 0.8
                     }
                   }}
                 >
-                  {loading ? 'Querying...' : 'Execute Query'}
+                  {loading ? 'Querying...' : 'Query Data'}
                 </Button>
+
+                {selectedModels.length === 0 && (
+                  <Alert severity="warning" sx={{ fontSize: '0.8rem' }}>
+                    Please select at least one detection model
+                  </Alert>
+                )}
               </Box>
             </div>
           </LocalizationProvider>
         ) : (
           <div className="llm-content">
-            <h3>LLM Query</h3>
-            <p>Natural language query interface</p>
-            <textarea 
+            <h3>LLM Assistant</h3>
+            <p>Ask questions about your detection data</p>
+            <textarea
               className="llm-input"
-              placeholder="Ask about your snapshots in natural language..."
-              rows="4"
+              placeholder="Ask something about the detection results..."
+              rows={4}
             />
-            <button className="query-button">Send Query</button>
+            <button className="query-button">
+              Send Query
+            </button>
           </div>
         )}
       </div>
     </div>
   );
-}
+};
 
 export default LateralMenu;

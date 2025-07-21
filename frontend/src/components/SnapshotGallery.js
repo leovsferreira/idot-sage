@@ -9,12 +9,29 @@ const SnapshotGallery = ({ images = [] }) => {
     return `/api/proxy-image?url=${encodeURIComponent(originalUrl)}`;
   };
 
+  const formatTimestamp = (timestamp) => {
+    const date = new Date(timestamp);
+    
+    return date.toLocaleString('en-US', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }) + ' UTC';
+    
+  };
+
   return (
     <>
       <div className="snapshot-gallery">
         {images.length === 0 ? (
           <div className="empty-state">
             <h1>Snapshot Gallery</h1>
+            <p className="placeholder-text">Query data to see snapshots</p>
           </div>
         ) : (
           <div className="gallery-grid">
@@ -35,8 +52,8 @@ const SnapshotGallery = ({ images = [] }) => {
                 />
                 <div className="image-info">
                   <span className="node-badge" style={{ backgroundColor: COLORS.sage }}>{image.node}</span>
-                  <span className="timestamp">
-                    {new Date(image.timestamp).toLocaleString()}
+                  <span className="timestamp" title={`Original: ${image.timestamp}`}>
+                    {formatTimestamp(image.timestamp)}
                   </span>
                 </div>
               </div>
