@@ -58,7 +58,7 @@ function App() {
       <div className="main-container">
         <div className="content-area">
           {/* Gallery shows only saved images */}
-          <SnapshotGallery images={galleryImages} />
+          <SnapshotGallery images={galleryImages} selectedModels={selectedModels} />
           {/* Timeline shows ALL data (saved images + inference-only) */}
           <D3Timeline images={queryResults} selectedModels={selectedModels} />
         </div>
