@@ -53,7 +53,7 @@ def extract_timestamp_from_url(url):
     return None
 
 def create_image_records(upload_df, detection_df, selected_models):
-    """Create merged image records with detection data"""
+    """Create merged image records with detection data - includes all inferences"""
     images = []
     
     detection_lookup = {}
@@ -78,11 +78,14 @@ def create_image_records(upload_df, detection_df, selected_models):
     
     print(f"Built detection lookup with {len(detection_lookup)} entries")
     
+    matched_detections = set()
+    
     for _, upload_row in upload_df.iterrows():
         url_timestamp = extract_timestamp_from_url(upload_row['value'])
         
         if url_timestamp and url_timestamp in detection_lookup:
             detection_info = detection_lookup[url_timestamp]
+            matched_detections.add(url_timestamp)
             
             image_record = {
                 'url': upload_row['value'],
@@ -91,6 +94,7 @@ def create_image_records(upload_df, detection_df, selected_models):
                 'filename': upload_row.get('meta.filename', 'snapshot.jpg'),
                 'image_timestamp_ns': url_timestamp,
                 'models_results': detection_info['models_results'],
+                'has_image': True,
                 'meta': {
                     'host': upload_row['meta.host'],
                     'job': upload_row['meta.job'],
@@ -108,6 +112,7 @@ def create_image_records(upload_df, detection_df, selected_models):
                 'filename': upload_row.get('meta.filename', 'snapshot.jpg'),
                 'image_timestamp_ns': url_timestamp or 0,
                 'models_results': {},
+                'has_image': True,
                 'meta': {
                     'host': upload_row['meta.host'],
                     'job': upload_row['meta.job'],
@@ -117,6 +122,33 @@ def create_image_records(upload_df, detection_df, selected_models):
                 }
             }
             images.append(image_record)
+    
+    orphaned_count = 0
+    for timestamp_ns, detection_info in detection_lookup.items():
+        if timestamp_ns not in matched_detections:
+            orphaned_count += 1
+            
+            detection_timestamp = detection_info['detection_timestamp']
+            image_record = {
+                'url': None,
+                'timestamp': detection_timestamp.isoformat() if hasattr(detection_timestamp, 'isoformat') else str(detection_timestamp),
+                'node': 'unknown',
+                'filename': f"inference_{timestamp_ns}.jpg",
+                'image_timestamp_ns': timestamp_ns,
+                'models_results': detection_info['models_results'],
+                'has_image': False,
+                'meta': {
+                    'host': '',
+                    'job': '',
+                    'plugin': '',
+                    'task': '',
+                    'zone': ''
+                }
+            }
+            images.append(image_record)
+    
+    print(f"Added {orphaned_count} orphaned detections (inferences without saved images)")
+    print(f"Total records: {len(images)} (uploads + orphaned detections)")
     
     return images
 

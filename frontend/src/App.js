@@ -37,18 +37,29 @@ function App() {
     });
   };
 
+  const galleryImages = queryResults.filter(image => image.has_image !== false);
+  
+  const savedImagesCount = galleryImages.length;
+  const inferenceOnlyCount = queryResults.length - savedImagesCount;
+
   return (
     <div className="app">
       <div className="status-bar">
         Backend: <span className={`status ${backendStatus}`}>{backendStatus}</span>
         {queryResults.length > 0 && (
-          <span className="result-count"> | {queryResults.length} images found</span>
+          <span className="result-count">
+            | {savedImagesCount} saved images
+            {inferenceOnlyCount > 0 && `, ${inferenceOnlyCount} inference-only`}
+            {` (${queryResults.length} total records)`}
+          </span>
         )}
       </div>
       
       <div className="main-container">
         <div className="content-area">
-          <SnapshotGallery images={queryResults} />
+          {/* Gallery shows only saved images */}
+          <SnapshotGallery images={galleryImages} />
+          {/* Timeline shows ALL data (saved images + inference-only) */}
           <D3Timeline images={queryResults} selectedModels={selectedModels} />
         </div>
         <LateralMenu 
