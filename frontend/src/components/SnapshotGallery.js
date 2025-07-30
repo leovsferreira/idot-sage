@@ -15,6 +15,18 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
 
   const allModels = ['YOLOv5n', 'YOLOv8n', 'YOLOv10n'];
 
+  const modelsWithData = React.useMemo(() => {
+    const modelsFound = new Set();
+    images.forEach(image => {
+      if (image.models_results) {
+        Object.keys(image.models_results).forEach(model => {
+          modelsFound.add(model);
+        });
+      }
+    });
+    return Array.from(modelsFound);
+  }, [images]);
+
   const getProxyUrl = (originalUrl) => {
     return `/api/proxy-image?url=${encodeURIComponent(originalUrl)}`;
   };
@@ -72,14 +84,18 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
       const ctx = canvas.getContext('2d');
       const rect = img.getBoundingClientRect();
       
+      // Set canvas size to match displayed image
       canvas.width = rect.width;
       canvas.height = rect.height;
       
+      // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // Calculate scale factors
       const scaleX = rect.width / imageDimensions.width;
       const scaleY = rect.height / imageDimensions.height;
 
+      // Draw detections for each active model
       Object.keys(showDetections).forEach(model => {
         if (showDetections[model] && image.models_results[model]?.detections) {
           const detections = image.models_results[model].detections;
@@ -88,25 +104,30 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
           detections.forEach((detection, detIndex) => {
             const [x1, y1, x2, y2] = detection.bbox;
             
+            // Scale coordinates to canvas
             const canvasX1 = x1 * scaleX;
             const canvasY1 = y1 * scaleY;
             const canvasX2 = x2 * scaleX;
             const canvasY2 = y2 * scaleY;
             
+            // Draw bounding box
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
             ctx.strokeRect(canvasX1, canvasY1, canvasX2 - canvasX1, canvasY2 - canvasY1);
             
+            // Draw label background
             const label = `${detection.class} (${(detection.confidence * 100).toFixed(1)}%)`;
             ctx.font = '12px Arial';
             const textMetrics = ctx.measureText(label);
             const textWidth = textMetrics.width;
             const textHeight = 16;
             
+            // Label background
             ctx.fillStyle = color;
             ctx.fillRect(canvasX1, canvasY1 - textHeight - 2, textWidth + 8, textHeight + 4);
             
+            // Label text
             ctx.fillStyle = 'white';
             ctx.fillText(label, canvasX1 + 4, canvasY1 - 4);
           });
@@ -221,7 +242,7 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
                     zIndex: 1000
                   }}>
                     {allModels.map(model => {
-                      const isAvailable = selectedModels.includes(model);
+                      const isAvailable = modelsWithData.includes(model);
                       const isChecked = showDetections[model] || false;
                       
                       return (
@@ -260,7 +281,7 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
                               color: '#6c757d',
                               fontStyle: 'italic'
                             }}>
-                              (not queried)
+                              (no data)
                             </span>
                           )}
                         </label>

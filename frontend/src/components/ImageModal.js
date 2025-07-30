@@ -14,6 +14,11 @@ const ImageModal = ({ image, onClose, showDetections = {}, selectedModels = [] }
     'YOLOv10n': '#45B7D1'
   };
 
+  const modelsWithData = React.useMemo(() => {
+    if (!image?.models_results) return [];
+    return Object.keys(image.models_results);
+  }, [image]);
+
   useEffect(() => {
     if (image && imageLoaded && canvasRef.current && imgRef.current) {
       drawDetections();
@@ -138,6 +143,7 @@ const ImageModal = ({ image, onClose, showDetections = {}, selectedModels = [] }
   const timestamps = formatTimestamp(image.timestamp);
   const availableModels = image.models_results ? Object.keys(image.models_results) : [];
   const hasAnyDetectionsEnabled = Object.values(localShowDetections).some(enabled => enabled);
+  const allModels = ['YOLOv5n', 'YOLOv8n', 'YOLOv10n'];
 
   const handleDetectionToggle = (model) => {
     setLocalShowDetections(prev => ({
@@ -184,8 +190,8 @@ const ImageModal = ({ image, onClose, showDetections = {}, selectedModels = [] }
                   </div>
                   
                   <div className="modal-detection-toggles">
-                    {availableModels.map(model => {
-                      const isAvailable = selectedModels.includes(model);
+                    {allModels.map(model => {
+                      const isAvailable = modelsWithData.includes(model);
                       const isChecked = localShowDetections[model] || false;
                       
                       return (
@@ -215,7 +221,7 @@ const ImageModal = ({ image, onClose, showDetections = {}, selectedModels = [] }
                           <span className="modal-detection-name">{model}</span>
                           {!isAvailable && (
                             <span className="modal-detection-unavailable">
-                              (not queried)
+                              (no data)
                             </span>
                           )}
                         </label>
