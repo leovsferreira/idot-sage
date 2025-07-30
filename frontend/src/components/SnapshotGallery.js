@@ -93,7 +93,6 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
             const canvasX2 = x2 * scaleX;
             const canvasY2 = y2 * scaleY;
             
-            // Draw bounding box
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
@@ -309,7 +308,9 @@ const SnapshotGallery = ({ images = [], selectedModels = [] }) => {
       
       <ImageModal 
         image={selectedImage} 
-        onClose={() => setSelectedImage(null)} 
+        onClose={() => setSelectedImage(null)}
+        showDetections={showDetections}
+        selectedModels={selectedModels}
       />
     </>
   );
