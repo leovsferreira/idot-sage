@@ -192,19 +192,6 @@ const DetectionFilter = ({ onFilterChange, currentFilter = null }) => {
               For example, "car ≥ 2 AND person ≥ 1" will only show scenes with at least 2 cars AND at least 1 person.
             </Typography>
           </Alert>
-
-          {/* Usage Examples */}
-          <Box sx={{ mt: 2, p: 1, bgcolor: '#f8f9fa', borderRadius: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.8rem', mb: 1 }}>
-              Example Filters:
-            </Typography>
-            <Typography variant="body2" sx={{ fontSize: '0.7rem', lineHeight: 1.3 }}>
-              • Heavy traffic: car ≥ 3<br/>
-              • Busy intersection: car ≥ 2 AND person ≥ 1<br/>
-              • Mixed transport: car ≥ 1 AND bus ≥ 1<br/>
-              • Pedestrian activity: person ≥ 3
-            </Typography>
-          </Box>
         </AccordionDetails>
       </Accordion>
     </Box>

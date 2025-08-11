@@ -138,8 +138,8 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
                     onChange={(e) => setSelectedNode(e.target.value)}
                   >
                     <MenuItem value="W042">W042</MenuItem>
-                    <MenuItem value="W043">W043</MenuItem>
-                    <MenuItem value="W044">W044</MenuItem>
+                    <MenuItem value="W065">W065</MenuItem>
+                    <MenuItem value="W06E">W06E</MenuItem>
                   </Select>
                 </FormControl>
 
