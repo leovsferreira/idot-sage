@@ -17,6 +17,44 @@ CORS(app)
 SAGE_USERNAME = os.getenv('SAGE_USERNAME')
 SAGE_ACCESS_TOKEN = os.getenv('SAGE_ACCESS_TOKEN')
 
+TRAFFIC_CLASSES = {
+    'person': 0,
+    'bicycle': 1,
+    'car': 2,
+    'motorcycle': 3,
+    'bus': 5,
+    'train': 7,
+    'truck': 8,
+}
+
+def filter_detections_by_classes(model_results, allowed_classes=None):
+    """Filter model detections to only include specified classes"""
+    if not allowed_classes:
+        allowed_classes = list(TRAFFIC_CLASSES.keys())
+    
+    if not model_results:
+        return model_results
+    
+    filtered_results = {}
+    
+    if 'counts' in model_results:
+        filtered_results['counts'] = {
+            class_name: count for class_name, count in model_results['counts'].items()
+            if class_name in allowed_classes
+        }
+    
+    if 'detections' in model_results:
+        filtered_results['detections'] = [
+            detection for detection in model_results['detections']
+            if detection.get('class') in allowed_classes
+        ]
+    
+    for key, value in model_results.items():
+        if key not in ['counts', 'detections']:
+            filtered_results[key] = value
+    
+    return filtered_results
+
 def apply_detection_filters_backend(images, detection_filter):
     """Apply detection filters on the backend side"""
     if not detection_filter or not detection_filter.get('conditions'):
@@ -107,21 +145,28 @@ def extract_timestamp_from_url(url):
         return int(match.group(1))
     return None
 
-def create_image_records(upload_df, detection_df, selected_models):
+def create_image_records(upload_df, detection_df, selected_models, allowed_classes=None):
     """Create merged image records with detection data - includes all inferences"""
-    images = []
+    if allowed_classes is None:
+        allowed_classes = list(TRAFFIC_CLASSES.keys())
     
+    images = []
     detection_lookup = {}
+    
+    print(f"Filtering detections to only include classes: {allowed_classes}")
     
     for _, det_row in detection_df.iterrows():
         try:
             detection_data = json.loads(det_row['value'])
             image_timestamp_ns = detection_data.get('image_timestamp_ns')
             if image_timestamp_ns:
-                filtered_models = {
-                    model: results for model, results in detection_data.get('models_results', {}).items()
-                    if model in selected_models
-                }
+                filtered_models = {}
+                for model, results in detection_data.get('models_results', {}).items():
+                    if model in selected_models:
+                        filtered_results = filter_detections_by_classes(results, allowed_classes)
+                        if filtered_results.get('counts') and any(count > 0 for count in filtered_results['counts'].values()):
+                            filtered_models[model] = filtered_results
+                
                 if filtered_models:
                     detection_lookup[image_timestamp_ns] = {
                         'models_results': filtered_models,
@@ -131,7 +176,7 @@ def create_image_records(upload_df, detection_df, selected_models):
             print(f"Error parsing detection data: {e}")
             continue
     
-    print(f"Built detection lookup with {len(detection_lookup)} entries")
+    print(f"Built detection lookup with {len(detection_lookup)} entries (after class filtering)")
     
     matched_detections = set()
     
@@ -223,16 +268,18 @@ def handle_query():
         node = data.get('node')
         models = data.get('models', ['YOLOv8n'])
         detection_filter = data.get('detectionFilter')
+        allowed_classes = data.get('allowedClasses', list(TRAFFIC_CLASSES.keys()))  # New parameter
         
         start = f"{start_date}T00:00:00Z"
         end = f"{end_date}T23:59:59Z"
         
         filter_params = {
-            "plugin": ".*multithread-sage-idot:1.1.0",
+            "plugin": "*multithread-sage-idot:1.1.0",
             "vsn": node
         }
         
         print(f"Querying with: start={start}, end={end}, filter={filter_params}")
+        print(f"Allowed classes: {allowed_classes}")
         if detection_filter:
             print(f"Detection filter applied: {detection_filter}")
         
@@ -259,6 +306,8 @@ def handle_query():
                 max_date = filtered_df['timestamp'].max()
                 print(f"Filtered data date range: {min_date} to {max_date}")
             
+            images = create_image_records(upload_df, detection_df, models, allowed_classes)
+            print(f"Created {len(images)} image records")
             
             if detection_filter:
                 images_before_filter = len(images)
@@ -279,7 +328,8 @@ def handle_query():
                     "end_time": end_time,
                     "node": node,
                     "models": models,
-                    "detection_filter": detection_filter
+                    "detection_filter": detection_filter,
+                    "allowed_classes": allowed_classes
                 },
                 "stats": {
                     "raw_records": len(df),
@@ -303,7 +353,8 @@ def handle_query():
                     "end_time": end_time,
                     "node": node,
                     "models": models,
-                    "detection_filter": detection_filter
+                    "detection_filter": detection_filter,
+                    "allowed_classes": allowed_classes
                 }
             })
             
