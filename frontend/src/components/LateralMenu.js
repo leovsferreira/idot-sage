@@ -4,11 +4,12 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { TextField, Select, MenuItem, FormControl, InputLabel, Button, Box, Checkbox, FormControlLabel, FormGroup, Alert } from '@mui/material';
+import { TextField, Select, MenuItem, FormControl, InputLabel, Button, Box, Checkbox, FormControlLabel, FormGroup, Alert, Typography } from '@mui/material';
 import dayjs from 'dayjs';
 import axios from 'axios';
+import DetectionFilter from './DetectionFilter';
 
-const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, selectedModels }) => {
+const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, selectedModels, onDetectionFilterChange }) => {
   const [startDate, setStartDate] = useState(dayjs());
   const [endDate, setEndDate] = useState(dayjs());
   const [startTime, setStartTime] = useState(null);
@@ -16,6 +17,7 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
   const [selectedNode, setSelectedNode] = useState('W042');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [detectionFilter, setDetectionFilter] = useState(null);
 
   const handleQuery = async () => {
     setLoading(true);
@@ -28,7 +30,8 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
         startTime: startTime ? startTime.format('HH:mm') : null,
         endTime: endTime ? endTime.format('HH:mm') : null,
         node: selectedNode,
-        models: selectedModels
+        models: selectedModels,
+        detectionFilter: detectionFilter
       };
 
       console.log('Sending query:', queryData);
@@ -55,6 +58,13 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
 
   const handleModelToggle = (model) => {
     onModelChange(model);
+  };
+
+  const handleDetectionFilterChange = (filterConfig) => {
+    setDetectionFilter(filterConfig);
+    if (onDetectionFilterChange) {
+      onDetectionFilterChange(filterConfig);
+    }
   };
 
   const getTimeRangeDescription = () => {
@@ -87,7 +97,7 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
         {activeTab === 'filter' ? (
           <LocalizationProvider dateAdapter={AdapterDayjs}>
             <div className="filter-content">
-              <h3>Filters</h3>
+              <h3>Data Query</h3>
               
               {error && (
                 <Alert severity="error" sx={{ mb: 2, fontSize: '0.8rem' }}>
@@ -163,6 +173,12 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
                   slotProps={{ textField: { size: 'small', fullWidth: true } }}
                 />
 
+                {/* Detection Filter */}
+                <DetectionFilter 
+                  onFilterChange={handleDetectionFilterChange}
+                  currentFilter={detectionFilter}
+                />
+
                 <Button
                   variant="contained"
                   onClick={handleQuery}
@@ -182,6 +198,17 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
                   <Alert severity="warning" sx={{ fontSize: '0.8rem' }}>
                     Please select at least one detection model
                   </Alert>
+                )}
+
+                {/* Query Summary */}
+                {(detectionFilter || getTimeRangeDescription() !== "All day (no time filter)") && (
+                  <Box sx={{ mt: 1, p: 1, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                    <Typography variant="caption" sx={{ fontSize: '0.75rem', color: '#666' }}>
+                      <strong>Query Summary:</strong><br/>
+                      Time: {getTimeRangeDescription()}<br/>
+                      {detectionFilter && `Filter: ${detectionFilter.type === 'custom' ? `${detectionFilter.conditions.length} custom conditions` : 'Unknown filter'}`}
+                    </Typography>
+                  </Box>
                 )}
               </Box>
             </div>

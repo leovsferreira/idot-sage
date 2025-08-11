@@ -17,6 +17,61 @@ CORS(app)
 SAGE_USERNAME = os.getenv('SAGE_USERNAME')
 SAGE_ACCESS_TOKEN = os.getenv('SAGE_ACCESS_TOKEN')
 
+def apply_detection_filters_backend(images, detection_filter):
+    """Apply detection filters on the backend side"""
+    if not detection_filter or not detection_filter.get('conditions'):
+        return images
+    
+    conditions = detection_filter.get('conditions', [])
+    filtered_images = []
+    
+    for image in images:
+        if not image.get('models_results'):
+            continue
+            
+        matches_filter = False
+        for model_name, model_results in image['models_results'].items():
+            if not model_results.get('counts'):
+                continue
+                
+            if matches_all_conditions(model_results['counts'], conditions):
+                matches_filter = True
+                break
+        
+        if matches_filter:
+            filtered_images.append(image)
+    
+    return filtered_images
+
+def matches_all_conditions(detection_counts, conditions):
+    """Check if detection counts match all filter conditions"""
+    for condition in conditions:
+        if condition.get('combineClasses') and condition.get('classes'):
+            total_count = sum(detection_counts.get(class_name, 0) for class_name in condition['classes'])
+            if not evaluate_condition(total_count, condition['operator'], condition['count']):
+                return False
+        elif condition.get('class'):
+            class_count = detection_counts.get(condition['class'], 0)
+            if not evaluate_condition(class_count, condition['operator'], condition['count']):
+                return False
+    
+    return True
+
+def evaluate_condition(actual_count, operator, expected_count):
+    """Evaluate a single condition"""
+    if operator == '>=':
+        return actual_count >= expected_count
+    elif operator == '=':
+        return actual_count == expected_count
+    elif operator == '<=':
+        return actual_count <= expected_count
+    elif operator == '>':
+        return actual_count > expected_count
+    elif operator == '<':
+        return actual_count < expected_count
+    else:
+        return False
+
 def filter_data_by_time(df, start_time=None, end_time=None):
     """Apply client-side time filtering to the dataframe after querying"""
     if start_time is None and end_time is None:
@@ -167,6 +222,7 @@ def handle_query():
         end_time = data.get('endTime')
         node = data.get('node')
         models = data.get('models', ['YOLOv8n'])
+        detection_filter = data.get('detectionFilter')
         
         start = f"{start_date}T00:00:00Z"
         end = f"{end_date}T23:59:59Z"
@@ -177,6 +233,8 @@ def handle_query():
         }
         
         print(f"Querying with: start={start}, end={end}, filter={filter_params}")
+        if detection_filter:
+            print(f"Detection filter applied: {detection_filter}")
         
         df = sage_data_client.query(
             start=start,
@@ -201,7 +259,12 @@ def handle_query():
                 max_date = filtered_df['timestamp'].max()
                 print(f"Filtered data date range: {min_date} to {max_date}")
             
-            images = create_image_records(upload_df, detection_df, models)
+            
+            if detection_filter:
+                images_before_filter = len(images)
+                images = apply_detection_filters_backend(images, detection_filter)
+                images_after_filter = len(images)
+                print(f"Detection filter applied: {images_after_filter}/{images_before_filter} images match filter")
             
             images.sort(key=lambda x: x['timestamp'])
             
@@ -215,7 +278,8 @@ def handle_query():
                     "start_time": start_time,
                     "end_time": end_time,
                     "node": node,
-                    "models": models
+                    "models": models,
+                    "detection_filter": detection_filter
                 },
                 "stats": {
                     "raw_records": len(df),
@@ -238,7 +302,8 @@ def handle_query():
                     "start_time": start_time,
                     "end_time": end_time,
                     "node": node,
-                    "models": models
+                    "models": models,
+                    "detection_filter": detection_filter
                 }
             })
             
