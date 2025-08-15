@@ -68,3 +68,6 @@ frontend/.env.production.local
 # test data files
 sample.csv
 test.ipynb
+
+# keys file
+./secrets

@@ -7,22 +7,22 @@ export const TRAFFIC_CLASSES = {
     'bus': 5,
     'train': 7,
     'truck': 8,
-  };
+};
   
-  export const CLASS_GROUPS = {
-    'People and Mobility': ['person', 'bicycle', 'motorcycle'],
-    'Vehicles': ['car', 'bus', 'train', 'truck'],
-  };
+export const CLASS_GROUPS = {
+    'People and Mobility': ['person', 'bicycle'],
+    'Vehicles': ['car', 'bus', 'train', 'truck', 'motorcycle'],
+};
   
-  export const OPERATORS = [
+export const OPERATORS = [
     { value: '>=', label: 'At least' },
     { value: '=', label: 'Exactly' },
     { value: '<=', label: 'At most' },
     { value: '>', label: 'More than' },
     { value: '<', label: 'Less than' }
-  ];
+];
   
-  export const matchesFilterConditions = (detectionsData, conditions) => {
+export const matchesFilterConditions = (detectionsData, conditions) => {
     if (!conditions || conditions.length === 0) return true;
     if (!detectionsData) return false;
     
@@ -38,9 +38,9 @@ export const TRAFFIC_CLASSES = {
       }
       return false;
     });
-  };
+};
   
-  const evaluateCondition = (actualCount, operator, expectedCount) => {
+const evaluateCondition = (actualCount, operator, expectedCount) => {
     switch (operator) {
       case '>=': return actualCount >= expectedCount;
       case '=': return actualCount === expectedCount;
@@ -49,9 +49,9 @@ export const TRAFFIC_CLASSES = {
       case '<': return actualCount < expectedCount;
       default: return false;
     }
-  };
+};
   
-  export const applyDetectionFilters = (images, filterConfig) => {
+export const applyDetectionFilters = (images, filterConfig) => {
     if (!filterConfig || !filterConfig.conditions) {
       return images;
     }
@@ -64,9 +64,9 @@ export const TRAFFIC_CLASSES = {
         return matchesFilterConditions(modelResults.counts, filterConfig.conditions);
       });
     });
-  };
+};
   
-  export const getFilterSummary = (filterConfig) => {
+export const getFilterSummary = (filterConfig) => {
     if (!filterConfig) return 'No detection filters';
     
     if (filterConfig.type === 'custom') {
@@ -75,4 +75,4 @@ export const TRAFFIC_CLASSES = {
     }
     
     return 'Unknown filter';
-  };
+};

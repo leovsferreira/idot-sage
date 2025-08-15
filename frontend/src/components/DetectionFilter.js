@@ -17,7 +17,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
-import { TRAFFIC_CLASSES, CLASS_GROUPS, OPERATORS } from '../utils/trafficClasses';
+import { CLASS_GROUPS, OPERATORS } from '../utils/trafficClasses';
 
 const DetectionFilter = ({ onFilterChange, currentFilter = null }) => {
   const [customConditions, setCustomConditions] = useState([]);
