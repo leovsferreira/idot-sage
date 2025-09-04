@@ -1,15 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
-import * as d3 from 'd3';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { COLORS } from './styles/colors';
+import * as d3 from 'd3';
 
 const Timeline = ({ images = [], selectedModels = [] }) => {
-  const svgRef = useRef();
-  const containerRef = useRef();
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const svgRef = useRef(null);
+  const containerRef = useRef(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
+  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, content: '' });
   const [activeTab, setActiveTab] = useState('timeline');
   const [aggregationType, setAggregationType] = useState('sum');
-  const [aggregationPeriod, setAggregationPeriod] = useState(30);
-  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, content: '' });
+  const [aggregationPeriod, setAggregationPeriod] = useState(60);
 
   const modelColors = {
     YOLOv5n: '#FF6B6B',
@@ -17,103 +17,140 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     YOLOv10n: '#45B7D1',
   };
 
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setDimensions({ width: rect.width - 40, height: rect.height - 40 });
-      }
-    };
-
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === 'timeline') {
-      drawTimeline();
-    } else if (activeTab === 'aggregated') {
-      drawAggregatedView();
-    }
-  }, [images, selectedModels, dimensions, activeTab, aggregationType, aggregationPeriod]);
-
-  const processTimelineData = () => {
+  const processTimelineData = useCallback(() => {
     const dataByDay = {};
-    const filteredImages = images.filter((img) => selectedModels.includes(img.model));
 
-    filteredImages.forEach((img) => {
-      const date = new Date(img.timestamp);
-      const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      const hour = date.getHours() + date.getMinutes() / 60;
+    images.forEach((image) => {
+      if (!image.models_results) return;
+
+      const date = new Date(image.timestamp);
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const dayKey = `${year}-${month}-${day}`;
+      const hour = date.getUTCHours();
+      const minutes = date.getUTCMinutes();
+      const hourFloat = hour + minutes / 60;
 
       if (!dataByDay[dayKey]) dataByDay[dayKey] = [];
 
-      const existingEntry = dataByDay[dayKey].find((entry) => entry.model === img.model && Math.abs(entry.hour - hour) < 0.1);
-
-      if (existingEntry) {
-        existingEntry.totalObjects += img.value;
-        if (!existingEntry.hasImage && img.filename) existingEntry.hasImage = true;
-      } else {
-        dataByDay[dayKey].push({
-          model: img.model,
-          hour,
-          totalObjects: img.value,
-          hasImage: !!img.filename,
-        });
-      }
+      selectedModels.forEach((model) => {
+        if (image.models_results[model]) {
+          dataByDay[dayKey].push({
+            hour: hourFloat,
+            model,
+            totalObjects: image.models_results[model].total_objects || 0,
+            timestamp: image.timestamp,
+            counts: image.models_results[model].counts || {},
+            hasImage: image.has_image !== false,
+            filename: image.filename,
+            node: image.node,
+          });
+        }
+      });
     });
 
     return dataByDay;
-  };
+  }, [images, selectedModels]);
 
-  const processAggregatedData = () => {
-    const filteredImages = images.filter((img) => selectedModels.includes(img.model));
-    const bucketData = {};
+  const processAggregatedData = useCallback(() => {
+    if (!images.length || !selectedModels.length) return { aggregatedData: [] };
 
-    filteredImages.forEach((img) => {
-      const date = new Date(img.timestamp);
-      const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      const periodInMs = aggregationPeriod * 60 * 1000;
-      const bucketIndex = Math.floor(date.getTime() / periodInMs);
-      const bucketKey = `${dayKey}-${bucketIndex}`;
+    const buckets = {};
+    const period = Math.max(1, Number(aggregationPeriod) || 60);
 
-      if (!bucketData[bucketKey]) {
-        const bucketStart = new Date(bucketIndex * periodInMs);
-        bucketData[bucketKey] = {
+    images.forEach((image) => {
+      if (!image.models_results) return;
+
+      const date = new Date(image.timestamp);
+      const minutes = date.getUTCMinutes();
+      const hours = date.getUTCHours();
+
+      const bucketMinutes = Math.floor(minutes / period) * period;
+      const bucketTime = +(hours + bucketMinutes / 60).toFixed(2);
+
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const dayKey = `${year}-${month}-${day}`;
+      const bucketKey = `${dayKey}_${bucketTime}`;
+
+      if (!buckets[bucketKey]) {
+        buckets[bucketKey] = {
           day: dayKey,
-          time: bucketStart.getHours() + bucketStart.getMinutes() / 60,
-          withImagesCount: 0,
-          inferenceOnlyCount: 0,
-          withImagesObjects: 0,
-          inferenceOnlyObjects: 0,
-          totalValue: 0,
+          time: bucketTime,
+          withImages: { count: 0, totalObjects: 0 },
+          inferenceOnly: { count: 0, totalObjects: 0 },
         };
       }
 
-      const bucket = bucketData[bucketKey];
-      if (img.filename) {
-        bucket.withImagesCount++;
-        bucket.withImagesObjects += img.value;
-      } else {
-        bucket.inferenceOnlyCount++;
-        bucket.inferenceOnlyObjects += img.value;
-      }
+      selectedModels.forEach((model) => {
+        const mr = image.models_results[model];
+        if (!mr) return;
+        const totalObjects = mr.total_objects || 0;
+
+        if (image.has_image !== false) {
+          buckets[bucketKey].withImages.count += 1;
+          buckets[bucketKey].withImages.totalObjects += totalObjects;
+        } else {
+          buckets[bucketKey].inferenceOnly.count += 1;
+          buckets[bucketKey].inferenceOnly.totalObjects += totalObjects;
+        }
+      });
     });
 
-    Object.values(bucketData).forEach((bucket) => {
-      if (aggregationType === 'sum') {
-        bucket.totalValue = bucket.withImagesObjects + bucket.inferenceOnlyObjects;
-      } else if (aggregationType === 'average') {
-        const totalCount = bucket.withImagesCount + bucket.inferenceOnlyCount;
-        bucket.totalValue = totalCount > 0 ? (bucket.withImagesObjects + bucket.inferenceOnlyObjects) / totalCount : 0;
-      }
+    const aggregatedData = [];
+
+    Object.values(buckets).forEach((b) => {
+      const totalInferences = b.withImages.count + b.inferenceOnly.count;
+      const totalObjects = b.withImages.totalObjects + b.inferenceOnly.totalObjects;
+      if (totalInferences === 0) return;
+
+      const sumValue = totalObjects;
+      const avgValue = totalInferences > 0 ? totalObjects / totalInferences : 0;
+      const totalValue = aggregationType === 'sum' ? sumValue : avgValue;
+
+      aggregatedData.push({
+        day: b.day,
+        time: b.time,
+        totalValue,
+        withImagesObjects: b.withImages.totalObjects,
+        inferenceOnlyObjects: b.inferenceOnly.totalObjects,
+        withImagesCount: b.withImages.count,
+        inferenceOnlyCount: b.inferenceOnly.count,
+      });
     });
 
-    return Object.values(bucketData);
-  };
+    return { aggregatedData };
+  }, [images, selectedModels, aggregationType, aggregationPeriod]);
 
-  const drawTimeline = () => {
+  const updateDimensions = useCallback(() => {
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const { width, height } = container.getBoundingClientRect();
+    setDimensions({ width: width - 40, height: Math.max(200, height - 80) });
+  }, []);
+
+  useEffect(() => {
+    updateDimensions();
+    const handleResize = () => updateDimensions();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [updateDimensions]);
+
+  useEffect(() => {
+    if (!containerRef.current || selectedModels.length === 0) return;
+
+    if (activeTab === 'timeline') {
+      if (images.length > 0) {
+        renderTimelineView();
+      }
+    } else {
+      renderAggregatedView();
+    }
+  }, [dimensions, images.length, selectedModels.length, activeTab, aggregationType, aggregationPeriod]);
+
+  const renderTimelineView = () => {
     const dataByDay = processTimelineData();
     const days = Object.keys(dataByDay).sort();
     if (days.length === 0) return;
@@ -191,7 +228,17 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           .attr('stroke-width', detection.hasImage ? 0 : 1)
           .attr('stroke-dasharray', detection.hasImage ? 'none' : '2,2')
           .on('mouseover', function (event) {
-            const content = `Model: ${detection.model}\nTime: ${detection.hour.toFixed(1)}h\nObjects: ${detection.totalObjects}\nType: ${detection.hasImage ? 'Saved Image' : 'Inference Only'}`;
+            const classes = Object.entries(detection.counts)
+              .map(([cls, count]) => `${cls}: ${count}`)
+              .join(', ');
+            const imageStatus = detection.hasImage ? 'Saved Image' : 'Inference Only';
+            const content = `Model: ${detection.model}\nTime: ${new Date(
+              detection.timestamp
+            ).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })} UTC\nNode: ${
+              detection.node
+            }\nStatus: ${imageStatus}\nDetected: ${classes || 'None'}\nTotal Objects: ${
+              detection.totalObjects
+            }`;
             setTooltip({ visible: true, x: event.pageX + 10, y: event.pageY - 10, content });
           })
           .on('mouseout', () => setTooltip({ visible: false, x: 0, y: 0, content: '' }));
@@ -212,26 +259,37 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     }
   };
 
-  const drawAggregatedView = () => {
-    const aggregatedData = processAggregatedData();
-    if (aggregatedData.length === 0) return;
-
-    const dataByDay = {};
-    aggregatedData.forEach((bucket) => {
-      if (!dataByDay[bucket.day]) dataByDay[bucket.day] = [];
-      dataByDay[bucket.day].push(bucket);
-    });
-
-    const days = Object.keys(dataByDay).sort();
+  const renderAggregatedView = () => {
+    const { aggregatedData } = processAggregatedData();
 
     d3.select(svgRef.current).selectAll('*').remove();
     const { width, height } = dimensions;
-    const margin = { top: 50, right: 200, bottom: 20, left: 100 };
+    const margin = { top: 80, right: 20, bottom: 20, left: 100 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
     const svg = d3.select(svgRef.current).attr('width', width).attr('height', height);
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    if (aggregatedData.length === 0) {
+      g.append('text')
+        .attr('x', innerWidth / 2)
+        .attr('y', innerHeight / 2)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '14px')
+        .style('fill', '#6c757d')
+        .text('No aggregated data available');
+      return;
+    }
+
+    const dataByDay = {};
+    aggregatedData.forEach((d) => {
+      if (!dataByDay[d.day]) dataByDay[d.day] = [];
+      dataByDay[d.day].push(d);
+    });
+
+    const days = Object.keys(dataByDay).sort();
+    if (days.length === 0) return;
 
     const xScale = d3.scaleLinear().domain([0, 24]).range([0, innerWidth]);
     const yScale = d3.scaleBand().domain(days).range([0, innerHeight]).padding(0.2);
@@ -276,7 +334,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('stroke-dasharray', '4,4')
         .attr('opacity', 0.6);
     });
-
     for (let hour = 0; hour <= 24; hour += 4) {
       chartContainer
         .append('line')
@@ -520,8 +577,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           </div>
         )}
 
-        {/* Empty State for Timeline View */}
-        {activeTab === 'timeline' && images.length === 0 && (
+        {/* Empty State for Timeline and Aggregated View */}
+        {(activeTab === 'timeline' || activeTab === 'aggregated') && images.length === 0 && (
           <div
             style={{
               position: 'absolute',
@@ -534,25 +591,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             }}
           >
             <div>No data</div>
-            <div style={{ fontSize: '12px', marginTop: '5px' }}>Query data and select aggregation settings above</div>
-          </div>
-        )}
-
-        {/* Empty State for Aggregated View */}
-        {activeTab === 'aggregated' && images.length === 0 && (
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              textAlign: 'center',
-              color: '#6c757d',
-              fontSize: '14px',
-            }}
-          >
-            <div>No data to aggregate</div>
-            <div style={{ fontSize: '12px', marginTop: '5px' }}>Query data and select aggregation settings above</div>
           </div>
         )}
 
