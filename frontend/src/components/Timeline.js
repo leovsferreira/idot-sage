@@ -73,82 +73,69 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const month = String(date.getUTCMonth() + 1).padStart(2, '0');
       const day = String(date.getUTCDate()).padStart(2, '0');
       const dayKey = `${year}-${month}-${day}`;
-      const bucketKey = `${dayKey}_${bucketTime}`;
+
+      const bucketKey = `${dayKey}-${bucketTime}`;
 
       if (!buckets[bucketKey]) {
         buckets[bucketKey] = {
           day: dayKey,
           time: bucketTime,
-          withImages: { count: 0, totalObjects: 0 },
-          inferenceOnly: { count: 0, totalObjects: 0 },
+          withImagesCount: 0,
+          inferenceOnlyCount: 0,
+          withImagesObjects: 0,
+          inferenceOnlyObjects: 0,
+          totalValue: 0,
         };
       }
 
-      selectedModels.forEach((model) => {
-        const mr = image.models_results[model];
-        if (!mr) return;
-        const totalObjects = mr.total_objects || 0;
+      const bucket = buckets[bucketKey];
+      const hasImage = image.has_image !== false;
 
-        if (image.has_image !== false) {
-          buckets[bucketKey].withImages.count += 1;
-          buckets[bucketKey].withImages.totalObjects += totalObjects;
-        } else {
-          buckets[bucketKey].inferenceOnly.count += 1;
-          buckets[bucketKey].inferenceOnly.totalObjects += totalObjects;
+      selectedModels.forEach((model) => {
+        if (image.models_results[model]) {
+          const totalObjects = image.models_results[model].total_objects || 0;
+
+          if (hasImage) {
+            bucket.withImagesCount++;
+            bucket.withImagesObjects += totalObjects;
+          } else {
+            bucket.inferenceOnlyCount++;
+            bucket.inferenceOnlyObjects += totalObjects;
+          }
         }
       });
+
+      bucket.totalValue =
+        aggregationType === 'sum'
+          ? bucket.withImagesObjects + bucket.inferenceOnlyObjects
+          : (bucket.withImagesObjects + bucket.inferenceOnlyObjects) / (bucket.withImagesCount + bucket.inferenceOnlyCount) || 0;
     });
 
-    const aggregatedData = [];
-
-    Object.values(buckets).forEach((b) => {
-      const totalInferences = b.withImages.count + b.inferenceOnly.count;
-      const totalObjects = b.withImages.totalObjects + b.inferenceOnly.totalObjects;
-      if (totalInferences === 0) return;
-
-      const sumValue = totalObjects;
-      const avgValue = totalInferences > 0 ? totalObjects / totalInferences : 0;
-      const totalValue = aggregationType === 'sum' ? sumValue : avgValue;
-
-      aggregatedData.push({
-        day: b.day,
-        time: b.time,
-        totalValue,
-        withImagesObjects: b.withImages.totalObjects,
-        inferenceOnlyObjects: b.inferenceOnly.totalObjects,
-        withImagesCount: b.withImages.count,
-        inferenceOnlyCount: b.inferenceOnly.count,
-      });
-    });
+    const aggregatedData = Object.values(buckets).filter((bucket) => bucket.totalValue > 0);
 
     return { aggregatedData };
   }, [images, selectedModels, aggregationType, aggregationPeriod]);
 
-  const updateDimensions = useCallback(() => {
-    if (!containerRef.current) return;
-    const container = containerRef.current;
-    const { width, height } = container.getBoundingClientRect();
-    setDimensions({ width: width - 40, height: Math.max(200, height - 80) });
+  const handleResize = useCallback(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setDimensions({ width: rect.width, height: rect.height });
+    }
   }, []);
 
   useEffect(() => {
-    updateDimensions();
-    const handleResize = () => updateDimensions();
+    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [updateDimensions]);
+  }, [handleResize]);
 
   useEffect(() => {
-    if (!containerRef.current || selectedModels.length === 0) return;
-
     if (activeTab === 'timeline') {
-      if (images.length > 0) {
-        renderTimelineView();
-      }
-    } else {
+      renderTimelineView();
+    } else if (activeTab === 'aggregated') {
       renderAggregatedView();
     }
-  }, [dimensions, images.length, selectedModels.length, activeTab, aggregationType, aggregationPeriod]);
+  }, [dimensions, images, selectedModels, activeTab, aggregationType, aggregationPeriod]);
 
   const renderTimelineView = () => {
     const dataByDay = processTimelineData();
@@ -271,17 +258,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const svg = d3.select(svgRef.current).attr('width', width).attr('height', height);
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-    if (aggregatedData.length === 0) {
-      g.append('text')
-        .attr('x', innerWidth / 2)
-        .attr('y', innerHeight / 2)
-        .attr('text-anchor', 'middle')
-        .style('font-size', '14px')
-        .style('fill', '#6c757d')
-        .text('No aggregated data available');
-      return;
-    }
-
     const dataByDay = {};
     aggregatedData.forEach((d) => {
       if (!dataByDay[d.day]) dataByDay[d.day] = [];
@@ -334,6 +310,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('stroke-dasharray', '4,4')
         .attr('opacity', 0.6);
     });
+    
     for (let hour = 0; hour <= 24; hour += 4) {
       chartContainer
         .append('line')
@@ -360,62 +337,36 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         const x = xScale(bucket.time);
         const yBaseline = yScale(day) + yScale.bandwidth() / 2;
 
-        const blue = bucket.withImagesObjects;
-        const red = bucket.inferenceOnlyObjects;
-        const rawTotal = blue + red;
-
-        if (rawTotal <= 0) return;
-
-        const totalBarHeight = Math.max(1, sqrtScale(bucket.totalValue)); 
-
-        let withImagesHeight = (blue / rawTotal) * totalBarHeight;
-        let inferenceOnlyHeight = (red / rawTotal) * totalBarHeight;
-
-        if (blue > 0 && withImagesHeight < 1) withImagesHeight = 1;
-        if (red > 0 && inferenceOnlyHeight < 1) inferenceOnlyHeight = 1;
-
-        const sumH = withImagesHeight + inferenceOnlyHeight;
-        if (sumH > totalBarHeight) {
-          const scale = totalBarHeight / sumH;
-          withImagesHeight *= scale;
-          inferenceOnlyHeight *= scale;
-        }
+        const totalBarHeight = Math.max(1, sqrtScale(bucket.totalValue));
 
         const barGroup = chartContainer.append('g');
 
+        const modelColor = '#FF6B6B';
+        
         barGroup
           .append('rect')
           .attr('x', x - barWidth / 2)
-          .attr('y', yBaseline - withImagesHeight)
+          .attr('y', yBaseline - totalBarHeight)
           .attr('width', barWidth)
-          .attr('height', withImagesHeight)
-          .attr('fill', '#4ECDC4')
+          .attr('height', totalBarHeight)
+          .attr('fill', modelColor)
           .attr('stroke', '#2c3e50')
-          .attr('stroke-width', 0.5);
-
-        barGroup
-          .append('rect')
-          .attr('x', x - barWidth / 2)
-          .attr('y', yBaseline - withImagesHeight - inferenceOnlyHeight)
-          .attr('width', barWidth)
-          .attr('height', inferenceOnlyHeight)
-          .attr('fill', '#FF6B6B')
-          .attr('stroke', '#2c3e50')
-          .attr('stroke-width', 0.5);
+          .attr('stroke-width', 0.5)
+          .attr('opacity', 0.8);
 
         barGroup
           .append('rect')
           .attr('x', x - barWidth / 2 - 2)
-          .attr('y', yBaseline - withImagesHeight - inferenceOnlyHeight - 2)
+          .attr('y', yBaseline - totalBarHeight - 2)
           .attr('width', barWidth + 4)
-          .attr('height', withImagesHeight + inferenceOnlyHeight + 4)
+          .attr('height', totalBarHeight + 4)
           .attr('fill', 'transparent')
           .on('mouseover', function (event) {
             const content =
               `Time: ${bucket.time.toFixed(2)}h\n` +
-              `With Images: ${bucket.withImagesCount} inferences, ${blue} objects\n` +
-              `Inference Only: ${bucket.inferenceOnlyCount} inferences, ${red} objects\n` +
-              `${aggregationType}: ${bucket.totalValue.toFixed(2)}\n` +
+              `Total: ${bucket.totalValue} inferences, (${aggregationType})\n` +
+              `With Images: ${bucket.withImagesCount} inferences, ${bucket.withImagesObjects} objects\n` +
+              `Inference Only: ${bucket.inferenceOnlyCount} inferences, ${bucket.inferenceOnlyObjects} objects\n` +
               `Period: ${aggregationPeriod} min`;
             setTooltip({ visible: true, x: event.pageX + 10, y: event.pageY - 10, content });
           })
@@ -423,14 +374,14 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       });
     });
 
-    const legend = svg.append('g').attr('transform', `translate(${width - 180}, 10)`);
+    const legend = svg.append('g').attr('transform', `translate(${width - 200}, 10)`);
 
     legend
       .append('rect')
       .attr('x', -10)
       .attr('y', -5)
-      .attr('width', 187)
-      .attr('height', 40)
+      .attr('width', 167)
+      .attr('height', 50)
       .attr('fill', 'rgba(255, 255, 255, 0.9)')
       .attr('stroke', '#ddd')
       .attr('rx', 4);
@@ -442,25 +393,16 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .style('font-size', '11px')
       .style('font-weight', 'bold')
       .style('fill', '#2c3e50')
-      .text(`Stacked Bars - ${aggregationType} per ${aggregationPeriod}min`);
+      .text(`Bar Chart - ${aggregationType} per ${aggregationPeriod}min`);
 
-    legend.append('rect').attr('x', 5).attr('y', 18).attr('width', 12).attr('height', 8).attr('fill', '#4ECDC4').attr('stroke', '#2c3e50').attr('stroke-width', 0.5);
+    legend.append('rect').attr('x', 0).attr('y', 20).attr('width', 12).attr('height', 8).attr('fill', '#FF6B6B').attr('stroke', '#2c3e50').attr('stroke-width', 0.5);
     legend
       .append('text')
-      .attr('x', 22)
-      .attr('y', 25)
+      .attr('x', 15)
+      .attr('y', 27)
       .style('font-size', '10px')
       .style('fill', '#2c3e50')
-      .text('With Images');
-
-    legend.append('rect').attr('x', 85).attr('y', 18).attr('width', 12).attr('height', 8).attr('fill', '#FF6B6B').attr('stroke', '#2c3e50').attr('stroke-width', 0.5);
-    legend
-      .append('text')
-      .attr('x', 102)
-      .attr('y', 25)
-      .style('font-size', '10px')
-      .style('fill', '#2c3e50')
-      .text('Inference Only');
+      .text('YOLOv8n');
   };
 
   return (
@@ -621,59 +563,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             }}
           >
             {tooltip.content}
-          </div>
-        )}
-
-        {/* Model Legend (for timeline view) */}
-        {activeTab === 'timeline' && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '10px',
-              right: '10px',
-              display: 'flex',
-              gap: '10px',
-              fontSize: '11px',
-            }}
-          >
-            {selectedModels.map((model) => (
-              <div key={model} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <div style={{ width: '12px', height: '12px', backgroundColor: modelColors[model], borderRadius: '2px' }} />
-                <span style={{ color: '#5a6c7d' }}>{model}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Data Type Legend (for timeline view) */}
-        {activeTab === 'timeline' && (
-          <div
-            style={{
-              position: 'absolute',
-              top: '10px',
-              right: '10px',
-              display: 'flex',
-              gap: '15px',
-              fontSize: '10px',
-              color: '#5a6c7d',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <div style={{ width: '12px', height: '4px', backgroundColor: '#999', opacity: 0.8 }} />
-              <span>Saved Image</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <div
-                style={{
-                  width: '12px',
-                  height: '4px',
-                  backgroundColor: '#999',
-                  opacity: 0.6,
-                  border: '1px dashed #333',
-                }}
-              />
-              <span>Inference Only</span>
-            </div>
           </div>
         )}
       </div>
