@@ -264,7 +264,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .style('fill', '#2c3e50')
       .text('Saved Image');
 
-    // Dashed line example
     strokeLegend
       .append('rect')
       .attr('x', 80)
@@ -286,13 +285,13 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .text('Inference Only');
 
     if (selectedModels.length > 0) {
-      const modelLegend = svg.append('g').attr('transform', `translate(${width - 130}, ${height - 40})`);
-
       const legendHeight = Math.max(45, selectedModels.length * 15 + 20);
+      // place near the top-left padding; keep existing yPos math intact
+      const modelLegend = svg.append('g').attr('transform', `translate(10, ${10 + legendHeight - 35})`);
       
       selectedModels.forEach((model, index) => {
         const yPos = -legendHeight + 35 + (index * 15);
-        
+
         modelLegend
           .append('rect')
           .attr('x', 0)
