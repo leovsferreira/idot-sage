@@ -145,7 +145,7 @@ def extract_timestamp_from_url(url):
         return int(match.group(1))
     return None
 
-def create_image_records(upload_df, detection_df, selected_models, allowed_classes=None):
+def create_image_records(upload_df, detection_df, selected_models, allowed_classes=None, query_node=None):
     """Create merged image records with detection data - includes all inferences"""
     if allowed_classes is None:
         allowed_classes = list(TRAFFIC_CLASSES.keys())
@@ -232,7 +232,7 @@ def create_image_records(upload_df, detection_df, selected_models, allowed_class
             image_record = {
                 'url': None,
                 'timestamp': detection_timestamp.isoformat() if hasattr(detection_timestamp, 'isoformat') else str(detection_timestamp),
-                'node': 'unknown',
+                'node': query_node,
                 'filename': f"inference_{timestamp_ns}.jpg",
                 'image_timestamp_ns': timestamp_ns,
                 'models_results': detection_info['models_results'],
@@ -306,7 +306,7 @@ def handle_query():
                 max_date = filtered_df['timestamp'].max()
                 print(f"Filtered data date range: {min_date} to {max_date}")
             
-            images = create_image_records(upload_df, detection_df, models, allowed_classes)
+            images = create_image_records(upload_df, detection_df, models, allowed_classes, node)
             print(f"Created {len(images)} image records")
             
             if detection_filter:

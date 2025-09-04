@@ -7,9 +7,9 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const containerRef = useRef(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, content: '' });
-  const [activeTab, setActiveTab] = useState('timeline'); // 'timeline' | 'aggregated'
-  const [aggregationType, setAggregationType] = useState('sum'); // 'sum' | 'average'
-  const [aggregationPeriod, setAggregationPeriod] = useState(60); // minutes
+  const [activeTab, setActiveTab] = useState('timeline');
+  const [aggregationType, setAggregationType] = useState('sum');
+  const [aggregationPeriod, setAggregationPeriod] = useState(60);
 
   const modelColors = {
     YOLOv5n: '#FF6B6B',
@@ -53,7 +53,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     return dataByDay;
   }, [images, selectedModels]);
 
-  // Robust aggregation per time bucket (per selected models)
   const processAggregatedData = useCallback(() => {
     if (!images.length || !selectedModels.length) return { aggregatedData: [] };
 
@@ -68,7 +67,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const hours = date.getUTCHours();
 
       const bucketMinutes = Math.floor(minutes / period) * period;
-      const bucketTime = +(hours + bucketMinutes / 60).toFixed(2); // stable
+      const bucketTime = +(hours + bucketMinutes / 60).toFixed(2);
 
       const year = date.getUTCFullYear();
       const month = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -114,7 +113,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       aggregatedData.push({
         day: b.day,
         time: b.time,
-        totalValue, // this is what we scale by (sqrt) for total bar height
+        totalValue,
         withImagesObjects: b.withImages.totalObjects,
         inferenceOnlyObjects: b.inferenceOnly.totalObjects,
         withImagesCount: b.withImages.count,
@@ -149,7 +148,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     } else {
       renderAggregatedView();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dimensions, images.length, selectedModels.length, activeTab, aggregationType, aggregationPeriod]);
 
   const renderTimelineView = () => {
@@ -284,7 +282,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       return;
     }
 
-    // group by day
     const dataByDay = {};
     aggregatedData.forEach((d) => {
       if (!dataByDay[d.day]) dataByDay[d.day] = [];
@@ -297,7 +294,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const xScale = d3.scaleLinear().domain([0, 24]).range([0, innerWidth]);
     const yScale = d3.scaleBand().domain(days).range([0, innerHeight]).padding(0.2);
 
-    // axes
     g.append('g')
       .attr('class', 'x-axis')
       .call(
@@ -326,7 +322,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     const chartContainer = g.append('g');
 
-    // gridlines
     days.forEach((day) => {
       chartContainer
         .append('line')
@@ -352,15 +347,12 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     }
 
-    // sizes
     const maxTotal = d3.max(aggregatedData, (d) => d.totalValue) || 1;
     const maxBarHeight = Math.min(yScale.bandwidth() * 0.8, 40);
     const barWidth = 10;
 
-    // square-root scale for total height (favours visibility of low values)
     const sqrtScale = d3.scaleSqrt().domain([0, maxTotal]).range([0, maxBarHeight]);
 
-    // draw stacked bars (blue bottom, red top) with ONE tooltip per bar
     days.forEach((day) => {
       const dayData = dataByDay[day];
 
@@ -374,17 +366,14 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
         if (rawTotal <= 0) return;
 
-        const totalBarHeight = Math.max(1, sqrtScale(bucket.totalValue)); // ensure at least 1px
+        const totalBarHeight = Math.max(1, sqrtScale(bucket.totalValue)); 
 
-        // split heights by actual composition
         let withImagesHeight = (blue / rawTotal) * totalBarHeight;
         let inferenceOnlyHeight = (red / rawTotal) * totalBarHeight;
 
-        // ensure any non-zero segment is visible
         if (blue > 0 && withImagesHeight < 1) withImagesHeight = 1;
         if (red > 0 && inferenceOnlyHeight < 1) inferenceOnlyHeight = 1;
 
-        // if rounding caused overflow, renormalize
         const sumH = withImagesHeight + inferenceOnlyHeight;
         if (sumH > totalBarHeight) {
           const scale = totalBarHeight / sumH;
@@ -394,7 +383,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
         const barGroup = chartContainer.append('g');
 
-        // bottom (blue)
         barGroup
           .append('rect')
           .attr('x', x - barWidth / 2)
@@ -405,7 +393,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           .attr('stroke', '#2c3e50')
           .attr('stroke-width', 0.5);
 
-        // top (red)
         barGroup
           .append('rect')
           .attr('x', x - barWidth / 2)
@@ -416,7 +403,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           .attr('stroke', '#2c3e50')
           .attr('stroke-width', 0.5);
 
-        // single tooltip for the whole bar
         barGroup
           .append('rect')
           .attr('x', x - barWidth / 2 - 2)
@@ -437,14 +423,13 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       });
     });
 
-    // legend
     const legend = svg.append('g').attr('transform', `translate(${width - 180}, 10)`);
 
     legend
       .append('rect')
       .attr('x', -10)
       .attr('y', -5)
-      .attr('width', 170)
+      .attr('width', 187)
       .attr('height', 40)
       .attr('fill', 'rgba(255, 255, 255, 0.9)')
       .attr('stroke', '#ddd')
