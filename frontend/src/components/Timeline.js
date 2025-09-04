@@ -144,7 +144,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     d3.select(svgRef.current).selectAll('*').remove();
     const { width, height } = dimensions;
-    const margin = { top: 30, right: 20, bottom: 20, left: 100 };
+    const margin = { top: 50, right: 20, bottom: 20, left: 100 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -243,6 +243,73 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('stroke-width', 1)
         .attr('stroke-dasharray', '4,4')
         .attr('opacity', 0.6);
+    }
+
+    const strokeLegend = svg.append('g').attr('transform', `translate(${width - 210}, -15)`);
+
+    strokeLegend
+      .append('rect')
+      .attr('x', -5)
+      .attr('y', 20)
+      .attr('width', 18)
+      .attr('height', 4)
+      .attr('fill', "#93889A")
+      .attr('opacity', 0.8);
+
+    strokeLegend
+      .append('text')
+      .attr('x', 15)
+      .attr('y', 26)
+      .style('font-size', '10px')
+      .style('fill', '#2c3e50')
+      .text('Saved Image');
+
+    // Dashed line example
+    strokeLegend
+      .append('rect')
+      .attr('x', 80)
+      .attr('y', 20)
+      .attr('width', 18)
+      .attr('height', 4)
+      .attr('fill', "#93889A")
+      .attr('opacity', 0.6)
+      .attr('stroke', '#333')
+      .attr('stroke-width', 1)
+      .attr('stroke-dasharray', '2,2');
+
+    strokeLegend
+      .append('text')
+      .attr('x', 100)
+      .attr('y', 26)
+      .style('font-size', '10px')
+      .style('fill', '#2c3e50')
+      .text('Inference Only');
+
+    if (selectedModels.length > 0) {
+      const modelLegend = svg.append('g').attr('transform', `translate(${width - 130}, ${height - 40})`);
+
+      const legendHeight = Math.max(45, selectedModels.length * 15 + 20);
+      
+      selectedModels.forEach((model, index) => {
+        const yPos = -legendHeight + 35 + (index * 15);
+        
+        modelLegend
+          .append('rect')
+          .attr('x', 0)
+          .attr('y', yPos)
+          .attr('width', 12)
+          .attr('height', 8)
+          .attr('fill', modelColors[model])
+          .attr('opacity', 0.8);
+
+        modelLegend
+          .append('text')
+          .attr('x', 15)
+          .attr('y', yPos + 7)
+          .style('font-size', '10px')
+          .style('fill', '#2c3e50')
+          .text(model);
+      });
     }
   };
 
