@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { COLORS } from './styles/colors';
 import * as d3 from 'd3';
 
+
 const Timeline = ({ images = [], selectedModels = [] }) => {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
@@ -10,15 +11,44 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const [activeTab, setActiveTab] = useState('timeline');
   const [aggregationType, setAggregationType] = useState('sum');
   const [aggregationPeriod, setAggregationPeriod] = useState(60);
-
-  // NEW: toggle state for Timeline legend
   const [showSavedImage, setShowSavedImage] = useState(true);
   const [showInferenceOnly, setShowInferenceOnly] = useState(true);
+
+  const MARGIN = { top: 80, right: 20, bottom: 20, left: 100 };
+  const TITLE_Y = -30;
 
   const modelColors = {
     YOLOv5n: '#FF6B6B',
     YOLOv8n: '#4ECDC4',
     YOLOv10n: '#45B7D1',
+  };
+
+  const drawModelLegend = (svg, selectedModels, modelColors) => {
+    if (!selectedModels.length) return;
+
+    const entryH = 15;      // vertical spacing between entries
+    const x = 10;           // left padding
+    const y = MARGIN.top - 30; // <- anchor relative to chart top; adjust +/- to taste
+
+    const legend = svg.append('g').attr('transform', `translate(${x}, ${y})`);
+
+    selectedModels.forEach((model, i) => {
+      const yPos = i * entryH;
+      legend.append('rect')
+        .attr('x', 0)
+        .attr('y', yPos - 8)
+        .attr('width', 12)
+        .attr('height', 8)
+        .attr('fill', modelColors[model] || '#888')
+        .attr('opacity', 0.8);
+
+      legend.append('text')
+        .attr('x', 15)
+        .attr('y', yPos - 1) // baseline-align with swatch
+        .style('font-size', '10px')
+        .style('fill', '#2c3e50')
+        .text(model);
+    });
   };
 
   const processTimelineData = useCallback(() => {
@@ -58,8 +88,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   }, [images, selectedModels]);
 
   const processAggregatedData = useCallback(() => {
-    if (!images.length || !selectedModels.length) return { aggregatedData: [] };
+    if (!images.length || !selectedModels.length) return { aggregatedData: [], maxValue: 1 };
 
+    // Buckets keyed by `${dayKey}-${bucketTime}`
+    // Each bucket keeps per-model stats
     const buckets = {};
     const period = Math.max(1, Number(aggregationPeriod) || 60);
 
@@ -79,46 +111,77 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const dayKey = `${year}-${month}-${day}`;
 
       const bucketKey = `${dayKey}-${bucketTime}`;
-
       if (!buckets[bucketKey]) {
         buckets[bucketKey] = {
           day: dayKey,
           time: bucketTime,
-          withImagesCount: 0,
-          inferenceOnlyCount: 0,
-          withImagesObjects: 0,
-          inferenceOnlyObjects: 0,
-          totalValue: 0,
+          perModel: {} // model -> counters
         };
       }
 
-      const bucket = buckets[bucketKey];
       const hasImage = image.has_image !== false;
 
       selectedModels.forEach((model) => {
-        if (image.models_results[model]) {
-          const totalObjects = image.models_results[model].total_objects || 0;
+        const mr = image.models_results[model];
+        if (!mr) return;
 
-          if (hasImage) {
-            bucket.withImagesCount++;
-            bucket.withImagesObjects += totalObjects;
-          } else {
-            bucket.inferenceOnlyCount++;
-            bucket.inferenceOnlyObjects += totalObjects;
-          }
+        if (!buckets[bucketKey].perModel[model]) {
+          buckets[bucketKey].perModel[model] = {
+            withImagesCount: 0,
+            inferenceOnlyCount: 0,
+            withImagesObjects: 0,
+            inferenceOnlyObjects: 0,
+          };
+        }
+        const s = buckets[bucketKey].perModel[model];
+        const totalObjects = mr.total_objects || 0;
+
+        if (hasImage) {
+          s.withImagesCount += 1;
+          s.withImagesObjects += totalObjects;
+        } else {
+          s.inferenceOnlyCount += 1;
+          s.inferenceOnlyObjects += totalObjects;
         }
       });
-
-      bucket.totalValue =
-        aggregationType === 'sum'
-          ? bucket.withImagesObjects + bucket.inferenceOnlyObjects
-          : (bucket.withImagesObjects + bucket.inferenceOnlyObjects) / (bucket.withImagesCount + bucket.inferenceOnlyCount) || 0;
     });
 
-    const aggregatedData = Object.values(buckets).filter((bucket) => bucket.totalValue > 0);
+    const aggregatedData = [];
+    let maxValue = 1;
 
-    return { aggregatedData };
+    Object.values(buckets).forEach((b) => {
+      const perModelValues = {};
+      Object.entries(b.perModel).forEach(([model, s]) => {
+        const totalObjects = s.withImagesObjects + s.inferenceOnlyObjects;
+        const totalCount = s.withImagesCount + s.inferenceOnlyCount;
+        const value =
+          aggregationType === 'sum'
+            ? totalObjects
+            : totalCount > 0
+              ? totalObjects / totalCount
+              : 0;
+
+        perModelValues[model] = {
+          value,
+          ...s,
+          totalObjects,
+          totalCount,
+        };
+        if (value > maxValue) maxValue = value;
+      });
+
+      if (Object.values(perModelValues).some((m) => m.value > 0)) {
+        aggregatedData.push({
+          day: b.day,
+          time: b.time,
+          perModelValues,
+        });
+      }
+    });
+
+    return { aggregatedData, maxValue };
   }, [images, selectedModels, aggregationType, aggregationPeriod]);
+
 
   const handleResize = useCallback(() => {
     if (containerRef.current) {
@@ -152,7 +215,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     d3.select(svgRef.current).selectAll('*').remove();
     const { width, height } = dimensions;
-    const margin = { top: 50, right: 20, bottom: 20, left: 100 };
+    const margin = MARGIN;
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -315,38 +378,16 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .attr('height', 20)
       .attr('fill', 'transparent')
       .on('click', () => setShowInferenceOnly((v) => !v));
-    // --- end legend ---
 
-    if (selectedModels.length > 0) {
-      const legendHeight = Math.max(45, selectedModels.length * 15 + 20);
-      const modelLegend = svg.append('g').attr('transform', `translate(10, ${10 + legendHeight})`);
-      selectedModels.forEach((model, index) => {
-        const yPos = -legendHeight + 35 + index * 15;
-        modelLegend
-          .append('rect')
-          .attr('x', 0)
-          .attr('y', yPos)
-          .attr('width', 12)
-          .attr('height', 8)
-          .attr('fill', modelColors[model])
-          .attr('opacity', 0.8);
-        modelLegend
-          .append('text')
-          .attr('x', 15)
-          .attr('y', yPos + 7)
-          .style('font-size', '10px')
-          .style('fill', '#2c3e50')
-          .text(model);
-      });
-    }
+    drawModelLegend(svg, selectedModels, modelColors);
   };
 
   const renderAggregatedView = () => {
-    const { aggregatedData } = processAggregatedData();
+    const { aggregatedData, maxValue } = processAggregatedData();
 
     d3.select(svgRef.current).selectAll('*').remove();
     const { width, height } = dimensions;
-    const margin = { top: 80, right: 20, bottom: 20, left: 100 };
+    const margin = MARGIN;
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -367,9 +408,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     g.append('g')
       .attr('class', 'x-axis')
-      .call(
-        d3.axisTop(xScale).tickValues(d3.range(0, 25, 2)).tickFormat((d) => `${d.toString().padStart(2, '0')}:00`)
-      )
+      .call(d3.axisTop(xScale).tickValues(d3.range(0, 25, 2)).tickFormat((d) => `${d.toString().padStart(2, '0')}:00`))
       .style('font-size', '10px');
 
     g.append('g')
@@ -419,89 +458,78 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     }
 
-    const maxTotal = d3.max(aggregatedData, (d) => d.totalValue) || 1;
-    const maxBarHeight = Math.min(yScale.bandwidth() * 0.8, 40);
-    const barWidth = 10;
-
-    const sqrtScale = d3.scaleSqrt().domain([0, maxTotal]).range([0, maxBarHeight]);
-
-    days.forEach((day) => {
-      const dayData = dataByDay[day];
-
-      dayData.forEach((bucket) => {
-        const x = xScale(bucket.time);
-        const yBaseline = yScale(day) + yScale.bandwidth() / 2;
-
-        const totalBarHeight = Math.max(1, sqrtScale(bucket.totalValue));
-
-        const barGroup = chartContainer.append('g');
-
-        const modelColor = modelColors.YOLOv8n;
-
-        barGroup
-          .append('rect')
-          .attr('x', x - barWidth / 2)
-          .attr('y', yBaseline - totalBarHeight)
-          .attr('width', barWidth)
-          .attr('height', totalBarHeight)
-          .attr('fill', modelColor)
-          .attr('stroke', '#2c3e50')
-          .attr('stroke-width', 0.5)
-          .attr('opacity', 0.8);
-
-        barGroup
-          .append('rect')
-          .attr('x', x - barWidth / 2 - 2)
-          .attr('y', yBaseline - totalBarHeight - 2)
-          .attr('width', barWidth + 4)
-          .attr('height', totalBarHeight + 4)
-          .attr('fill', 'transparent')
-          .on('mouseover', function (event) {
-            const content =
-              `Time: ${bucket.time.toFixed(2)}h\n` +
-              `Total: ${bucket.totalValue} inferences, (${aggregationType})\n` +
-              `With Images: ${bucket.withImagesCount} inferences, ${bucket.withImagesObjects} objects\n` +
-              `Inference Only: ${bucket.inferenceOnlyCount} inferences, ${bucket.inferenceOnlyObjects} objects\n` +
-              `Period: ${aggregationPeriod} min`;
-            setTooltip({ visible: true, x: event.pageX + 10, y: event.pageY - 10, content });
-          })
-          .on('mouseout', () => setTooltip({ visible: false, x: 0, y: 0, content: '' }));
-      });
-    });
     g.append('text')
       .attr('x', innerWidth / 2)
-      .attr('y', -30) // above the top axis inside the chart area
+      .attr('y', TITLE_Y)
       .attr('text-anchor', 'middle')
       .style('font-size', '11px')
       .style('font-weight', 'bold')
       .style('fill', '#2c3e50')
       .text(`Bar Chart - ${aggregationType} per ${aggregationPeriod}min`);
 
-    if (selectedModels.length > 0) {
-      const legendHeight = Math.max(45, selectedModels.length * 15 + 20);
-      const modelLegend = svg.append('g').attr('transform', `translate(10, ${10 + legendHeight})`);
+    const sqrtScale = d3.scaleSqrt().domain([0, maxValue]).range([0, Math.min(yScale.bandwidth() * 0.8, 40)]);
+    const BAR_GAP = 2;
+    const DEFAULT_BAR_WIDTH = 8;
 
-      selectedModels.forEach((model, index) => {
-        const yPos = -legendHeight + 35 + index * 15;
+    days.forEach((day) => {
+      const dayData = dataByDay[day];
 
-        modelLegend
-          .append('rect')
-          .attr('x', 0)
-          .attr('y', yPos)
-          .attr('width', 12)
-          .attr('height', 8)
-          .attr('fill', modelColors[model])
-          .attr('opacity', 0.8);
+      dayData.forEach((bucket) => {
+        const modelsToPlot = selectedModels.filter(
+          (m) => bucket.perModelValues[m] && bucket.perModelValues[m].value > 0
+        );
 
-        modelLegend
-          .append('text')
-          .attr('x', 15)
-          .attr('y', yPos + 7)
-          .style('font-size', '10px')
-          .style('fill', '#2c3e50')
-          .text(model);
+        if (modelsToPlot.length === 0) return;
+
+        const barWidth = Math.max(4, Math.min(DEFAULT_BAR_WIDTH, 28 / modelsToPlot.length));
+        const groupWidth = modelsToPlot.length * barWidth + (modelsToPlot.length - 1) * BAR_GAP;
+
+        const xCenter = xScale(bucket.time);
+        const xStart = xCenter - groupWidth / 2;
+        const yBaseline = yScale(day) + yScale.bandwidth() / 2;
+
+        modelsToPlot.forEach((model, i) => {
+          const stats = bucket.perModelValues[model];
+          const h = Math.max(1, sqrtScale(stats.value));
+          const x = xStart + i * (barWidth + BAR_GAP);
+
+          const group = chartContainer.append('g');
+
+          group
+            .append('rect')
+            .attr('x', x)
+            .attr('y', yBaseline - h)
+            .attr('width', barWidth)
+            .attr('height', h)
+            .attr('fill', modelColors[model] || '#888')
+            .attr('stroke', '#2c3e50')
+            .attr('stroke-width', 0.5)
+            .attr('opacity', 0.85);
+
+          // larger, invisible hitbox for tooltip
+          group
+            .append('rect')
+            .attr('x', x - 2)
+            .attr('y', yBaseline - h - 2)
+            .attr('width', barWidth + 4)
+            .attr('height', h + 4)
+            .attr('fill', 'transparent')
+            .on('mouseover', (event) => {
+              const content =
+                `Model: ${model}\n` +
+                `Time: ${bucket.time.toFixed(2)}h\n` +
+                `Value: ${stats.value} (${aggregationType})\n` +
+                `With Images: ${stats.withImagesCount} inferences, ${stats.withImagesObjects} objects\n` +
+                `Inference Only: ${stats.inferenceOnlyCount} inferences, ${stats.inferenceOnlyObjects} objects\n` +
+                `Period: ${aggregationPeriod} min`;
+              setTooltip({ visible: true, x: event.pageX + 10, y: event.pageY - 10, content });
+            })
+            .on('mouseout', () => setTooltip({ visible: false, x: 0, y: 0, content: '' }));
+        });
       });
-    }
+    });
+
+    drawModelLegend(svg, selectedModels, modelColors);
   };
 
   return (
