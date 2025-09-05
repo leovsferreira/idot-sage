@@ -11,6 +11,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const [aggregationType, setAggregationType] = useState('sum');
   const [aggregationPeriod, setAggregationPeriod] = useState(60);
 
+  // NEW: toggle state for Timeline legend
+  const [showSavedImage, setShowSavedImage] = useState(true);
+  const [showInferenceOnly, setShowInferenceOnly] = useState(true);
+
   const modelColors = {
     YOLOv5n: '#FF6B6B',
     YOLOv8n: '#4ECDC4',
@@ -135,12 +139,16 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     } else if (activeTab === 'aggregated') {
       renderAggregatedView();
     }
-  }, [dimensions, images, selectedModels, activeTab, aggregationType, aggregationPeriod]);
+    // NEW: re-render Timeline when toggles change
+  }, [dimensions, images, selectedModels, activeTab, aggregationType, aggregationPeriod, showSavedImage, showInferenceOnly]);
 
   const renderTimelineView = () => {
     const dataByDay = processTimelineData();
     const days = Object.keys(dataByDay).sort();
-    if (days.length === 0) return;
+    if (days.length === 0) {
+      d3.select(svgRef.current).selectAll('*').remove();
+      return;
+    }
 
     d3.select(svgRef.current).selectAll('*').remove();
     const { width, height } = dimensions;
@@ -201,6 +209,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
 
       dayData.forEach((detection) => {
+        // NEW: respect toggles for Saved Image / Inference Only
+        if (detection.hasImage && !showSavedImage) return;
+        if (!detection.hasImage && !showInferenceOnly) return;
+
         const thickness = thicknessScale(detection.totalObjects);
 
         chartContainer
@@ -245,53 +257,71 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     }
 
+    // --- Legend (click-to-toggle) ---
     const strokeLegend = svg.append('g').attr('transform', `translate(${width - 210}, -15)`);
 
-    strokeLegend
+    // Saved Image item
+    const savedGroup = strokeLegend.append('g').attr('transform', `translate(0,0)`).style('cursor', 'pointer');
+    savedGroup
       .append('rect')
       .attr('x', -5)
       .attr('y', 20)
       .attr('width', 18)
       .attr('height', 4)
-      .attr('fill', "#93889A")
-      .attr('opacity', 0.8);
-
-    strokeLegend
+      .attr('fill', '#93889A')
+      .attr('opacity', showSavedImage ? 0.8 : 0.2);
+    savedGroup
       .append('text')
       .attr('x', 15)
       .attr('y', 26)
       .style('font-size', '10px')
-      .style('fill', '#2c3e50')
+      .style('fill', showSavedImage ? '#2c3e50' : '#9aa1a6')
       .text('Saved Image');
-
-    strokeLegend
+    // Invisible hitbox for easier clicking
+    savedGroup
       .append('rect')
-      .attr('x', 80)
+      .attr('x', -8)
+      .attr('y', 12)
+      .attr('width', 90)
+      .attr('height', 20)
+      .attr('fill', 'transparent')
+      .on('click', () => setShowSavedImage((v) => !v));
+
+    // Inference Only item
+    const infGroup = strokeLegend.append('g').attr('transform', `translate(80,0)`).style('cursor', 'pointer');
+    infGroup
+      .append('rect')
+      .attr('x', 0)
       .attr('y', 20)
       .attr('width', 18)
       .attr('height', 4)
-      .attr('fill', "#93889A")
-      .attr('opacity', 0.6)
+      .attr('fill', '#93889A')
+      .attr('opacity', showInferenceOnly ? 0.6 : 0.2)
       .attr('stroke', '#333')
       .attr('stroke-width', 1)
       .attr('stroke-dasharray', '2,2');
-
-    strokeLegend
+    infGroup
       .append('text')
-      .attr('x', 100)
+      .attr('x', 20)
       .attr('y', 26)
       .style('font-size', '10px')
-      .style('fill', '#2c3e50')
+      .style('fill', showInferenceOnly ? '#2c3e50' : '#9aa1a6')
       .text('Inference Only');
+    infGroup
+      .append('rect')
+      .attr('x', -3)
+      .attr('y', 12)
+      .attr('width', 110)
+      .attr('height', 20)
+      .attr('fill', 'transparent')
+      .on('click', () => setShowInferenceOnly((v) => !v));
+    // --- end legend ---
 
     if (selectedModels.length > 0) {
       const legendHeight = Math.max(45, selectedModels.length * 15 + 20);
-      // place near the top-left padding; keep existing yPos math intact
-      const modelLegend = svg.append('g').attr('transform', `translate(10, ${10 + legendHeight - 35})`);
-      
+      const modelLegend = svg.append('g').attr('transform', `translate(10, ${10 + legendHeight})`);
       selectedModels.forEach((model, index) => {
-        const yPos = -legendHeight + 35 + (index * 15);
-
+        const yPos = -legendHeight + 35 + index * 15;
         modelLegend
           .append('rect')
           .attr('x', 0)
@@ -300,7 +330,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           .attr('height', 8)
           .attr('fill', modelColors[model])
           .attr('opacity', 0.8);
-
         modelLegend
           .append('text')
           .attr('x', 15)
@@ -376,7 +405,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('stroke-dasharray', '4,4')
         .attr('opacity', 0.6);
     });
-    
+
     for (let hour = 0; hour <= 24; hour += 4) {
       chartContainer
         .append('line')
@@ -407,8 +436,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
         const barGroup = chartContainer.append('g');
 
-        const modelColor = '#FF6B6B';
-        
+        const modelColor = modelColors.YOLOv8n;
+
         barGroup
           .append('rect')
           .attr('x', x - barWidth / 2)
@@ -439,36 +468,40 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           .on('mouseout', () => setTooltip({ visible: false, x: 0, y: 0, content: '' }));
       });
     });
-
-    const legend = svg.append('g').attr('transform', `translate(${width - 200}, 10)`);
-
-    legend
-      .append('rect')
-      .attr('x', -10)
-      .attr('y', -5)
-      .attr('width', 167)
-      .attr('height', 50)
-      .attr('fill', 'rgba(255, 255, 255, 0.9)')
-      .attr('stroke', '#ddd')
-      .attr('rx', 4);
-
-    legend
-      .append('text')
-      .attr('x', 0)
-      .attr('y', 10)
+    g.append('text')
+      .attr('x', innerWidth / 2)
+      .attr('y', -30) // above the top axis inside the chart area
+      .attr('text-anchor', 'middle')
       .style('font-size', '11px')
       .style('font-weight', 'bold')
       .style('fill', '#2c3e50')
       .text(`Bar Chart - ${aggregationType} per ${aggregationPeriod}min`);
 
-    legend.append('rect').attr('x', 0).attr('y', 20).attr('width', 12).attr('height', 8).attr('fill', '#FF6B6B').attr('stroke', '#2c3e50').attr('stroke-width', 0.5);
-    legend
-      .append('text')
-      .attr('x', 15)
-      .attr('y', 27)
-      .style('font-size', '10px')
-      .style('fill', '#2c3e50')
-      .text('YOLOv8n');
+    if (selectedModels.length > 0) {
+      const legendHeight = Math.max(45, selectedModels.length * 15 + 20);
+      const modelLegend = svg.append('g').attr('transform', `translate(10, ${10 + legendHeight})`);
+
+      selectedModels.forEach((model, index) => {
+        const yPos = -legendHeight + 35 + index * 15;
+
+        modelLegend
+          .append('rect')
+          .attr('x', 0)
+          .attr('y', yPos)
+          .attr('width', 12)
+          .attr('height', 8)
+          .attr('fill', modelColors[model])
+          .attr('opacity', 0.8);
+
+        modelLegend
+          .append('text')
+          .attr('x', 15)
+          .attr('y', yPos + 7)
+          .style('font-size', '10px')
+          .style('fill', '#2c3e50')
+          .text(model);
+      });
+    }
   };
 
   return (
