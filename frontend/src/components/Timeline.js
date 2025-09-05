@@ -13,6 +13,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const [showSavedImage, setShowSavedImage] = useState(true);
   const [showInferenceOnly, setShowInferenceOnly] = useState(true);
 
+  // NEW: per-view model visibility (independent toggles)
+  const [hiddenTimelineModels, setHiddenTimelineModels] = useState(new Set());
+  const [hiddenAggregatedModels, setHiddenAggregatedModels] = useState(new Set());
+
   const MARGIN = { top: 80, right: 20, bottom: 20, left: 100 };
   const TITLE_Y = -30;
 
@@ -22,21 +26,22 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     YOLOv10n: '#45B7D1',
   };
 
-  // NEW: derive models purely from returned data
+  // derive models purely from returned data
   const presentModels = useMemo(() => {
     const set = new Set();
     images.forEach(img => {
-      if (img && img.models_results) {
+      if (img?.models_results) {
         Object.keys(img.models_results).forEach(m => set.add(m));
       }
     });
-    return Array.from(set).sort(); // stable order for legend
+    return Array.from(set).sort();
   }, [images]);
 
-  const drawModelLegend = (svg, models, modelColors) => {
+  // --- Legend (clickable) ---
+  const drawModelLegend = (svg, models, modelColors, hiddenSet, toggleModel) => {
     if (!models.length) return;
 
-    const entryH = 15;
+    const entryH = 16;
     const x = 10;
     const y = MARGIN.top - 30;
 
@@ -44,61 +49,81 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     models.forEach((model, i) => {
       const yPos = i * entryH;
+      const isHidden = hiddenSet.has(model);
+      const opacity = isHidden ? 0.25 : 0.9;
+
+      // color swatch
       legend
         .append('rect')
         .attr('x', 0)
-        .attr('y', yPos - 8)
+        .attr('y', yPos - 9)
         .attr('width', 12)
         .attr('height', 8)
         .attr('fill', modelColors[model] || '#888')
-        .attr('opacity', 0.8);
+        .attr('opacity', opacity);
 
+      // label
       legend
         .append('text')
-        .attr('x', 15)
+        .attr('x', 16)
         .attr('y', yPos - 1)
         .style('font-size', '10px')
-        .style('fill', '#2c3e50')
+        .style('fill', isHidden ? '#9aa1a6' : '#2c3e50')
+        .style('font-weight', isHidden ? 'normal' : 'bold')
         .text(model);
+
+      // click target
+      legend
+        .append('rect')
+        .attr('x', -4)
+        .attr('y', yPos - 12)
+        .attr('width', 120)
+        .attr('height', 16)
+        .attr('fill', 'transparent')
+        .style('cursor', 'pointer')
+        .on('click', () => toggleModel(model));
     });
   };
 
-  const processTimelineData = useCallback(() => {
-    const dataByDay = {};
+  const processTimelineData = useCallback(
+    (hiddenSet) => {
+      const dataByDay = {};
 
-    images.forEach((image) => {
-      if (!image?.models_results) return;
+      images.forEach((image) => {
+        if (!image?.models_results) return;
 
-      const date = new Date(image.timestamp);
-      const year = date.getUTCFullYear();
-      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(date.getUTCDate()).padStart(2, '0');
-      const dayKey = `${year}-${month}-${day}`;
-      const hour = date.getUTCHours();
-      const minutes = date.getUTCMinutes();
-      const hourFloat = hour + minutes / 60;
+        const date = new Date(image.timestamp);
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        const dayKey = `${year}-${month}-${day}`;
+        const hour = date.getUTCHours();
+        const minutes = date.getUTCMinutes();
+        const hourFloat = hour + minutes / 60;
 
-      if (!dataByDay[dayKey]) dataByDay[dayKey] = [];
+        if (!dataByDay[dayKey]) dataByDay[dayKey] = [];
 
-      // use models that are present in the data (not sidebar selection)
-      presentModels.forEach((model) => {
-        if (image.models_results[model]) {
-          dataByDay[dayKey].push({
-            hour: hourFloat,
-            model,
-            totalObjects: image.models_results[model].total_objects || 0,
-            timestamp: image.timestamp,
-            counts: image.models_results[model].counts || {},
-            hasImage: image.has_image !== false,
-            filename: image.filename,
-            node: image.node,
-          });
-        }
+        presentModels.forEach((model) => {
+          if (hiddenSet.has(model)) return; // respect per-view toggle
+          if (image.models_results[model]) {
+            dataByDay[dayKey].push({
+              hour: hourFloat,
+              model,
+              totalObjects: image.models_results[model].total_objects || 0,
+              timestamp: image.timestamp,
+              counts: image.models_results[model].counts || {},
+              hasImage: image.has_image !== false,
+              filename: image.filename,
+              node: image.node,
+            });
+          }
+        });
       });
-    });
 
-    return dataByDay;
-  }, [images, presentModels]);
+      return dataByDay;
+    },
+    [images, presentModels]
+  );
 
   const processAggregatedData = useCallback(() => {
     if (!images.length || !presentModels.length) return { aggregatedData: [], maxValue: 1 };
@@ -181,6 +206,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         if (value > maxValue) maxValue = value;
       });
 
+      // keep bucket if any model has non-zero value
       if (Object.values(perModelValues).some((m) => m.value > 0)) {
         aggregatedData.push({
           day: b.day,
@@ -206,24 +232,52 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
+  // Re-render on per-view hidden sets
   useEffect(() => {
     if (activeTab === 'timeline') {
       renderTimelineView();
     } else if (activeTab === 'aggregated') {
       renderAggregatedView();
     }
-  // IMPORTANT: exclude selectedModels so sidebar changes don't toggle charts
-  }, [dimensions, images, activeTab, aggregationType, aggregationPeriod, showSavedImage, showInferenceOnly, presentModels]);
+  }, [
+    dimensions,
+    images,
+    activeTab,
+    aggregationType,
+    aggregationPeriod,
+    showSavedImage,
+    showInferenceOnly,
+    presentModels,
+    hiddenTimelineModels,
+    hiddenAggregatedModels,
+  ]);
+
+  // helpers to toggle hidden sets immutably
+  const toggleTimelineModel = (model) => {
+    setHiddenTimelineModels((prev) => {
+      const next = new Set(prev);
+      if (next.has(model)) next.delete(model);
+      else next.add(model);
+      return next;
+    });
+  };
+  const toggleAggregatedModel = (model) => {
+    setHiddenAggregatedModels((prev) => {
+      const next = new Set(prev);
+      if (next.has(model)) next.delete(model);
+      else next.add(model);
+      return next;
+    });
+  };
 
   const renderTimelineView = () => {
-    const dataByDay = processTimelineData();
+    const dataByDay = processTimelineData(hiddenTimelineModels);
     const days = Object.keys(dataByDay).sort();
-    if (days.length === 0) {
-      d3.select(svgRef.current).selectAll('*').remove();
-      return;
-    }
 
     d3.select(svgRef.current).selectAll('*').remove();
+
+    if (days.length === 0) return;
+
     const { width, height } = dimensions;
     const margin = MARGIN;
     const innerWidth = width - margin.left - margin.right;
@@ -233,10 +287,14 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
     const xScale = d3.scaleLinear().domain([0, 24]).range([0, innerWidth]);
+    // scale thickness based on currently visible data
+    const flattenedVisible = Object.values(dataByDay).flat();
+    const maxObjects = d3.max(flattenedVisible, (d) => d.totalObjects) || 1;
+
     const yScale = d3.scaleBand().domain(days).range([0, innerHeight]).padding(0.2);
     const thicknessScale = d3
       .scaleLinear()
-      .domain([0, d3.max(Object.values(dataByDay).flat(), (d) => d.totalObjects) || 1])
+      .domain([0, maxObjects])
       .range([8, Math.min(yScale.bandwidth(), 30)]);
 
     g.append('g')
@@ -329,6 +387,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     }
 
+    // Saved vs Inference toggle (unchanged)
     const strokeLegend = svg.append('g').attr('transform', `translate(${width - 210}, -15)`);
 
     const savedGroup = strokeLegend.append('g').attr('transform', `translate(0,0)`).style('cursor', 'pointer');
@@ -384,7 +443,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .attr('fill', 'transparent')
       .on('click', () => setShowInferenceOnly((v) => !v));
 
-    drawModelLegend(svg, presentModels, modelColors);
+    // CLICKABLE model legend for TIMELINE
+    drawModelLegend(svg, presentModels, modelColors, hiddenTimelineModels, toggleTimelineModel);
   };
 
   const renderAggregatedView = () => {
@@ -480,8 +540,12 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const dayData = dataByDay[day];
 
       dayData.forEach((bucket) => {
+        // respect per-view hidden models for AGGREGATED
         const modelsToPlot = presentModels.filter(
-          (m) => bucket.perModelValues[m] && bucket.perModelValues[m].value > 0
+          (m) =>
+            !hiddenAggregatedModels.has(m) &&
+            bucket.perModelValues[m] &&
+            bucket.perModelValues[m].value > 0
         );
         if (modelsToPlot.length === 0) return;
 
@@ -532,12 +596,13 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       });
     });
 
-    drawModelLegend(svg, presentModels, modelColors);
+    // CLICKABLE model legend for AGGREGATED
+    drawModelLegend(svg, presentModels, modelColors, hiddenAggregatedModels, toggleAggregatedModel);
   };
 
   return (
     <div style={{ position: 'relative' }}>
-      {/* Tabs positioned outside and above the blue container */}
+      {/* Tabs */}
       <div
         style={{
           position: 'absolute',
@@ -582,7 +647,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         </button>
       </div>
 
-      {/* Blue container with square top-left corner */}
+      {/* Blue container */}
       <div
         ref={containerRef}
         style={{
@@ -649,7 +714,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           </div>
         )}
 
-        {/* Empty State for Timeline and Aggregated View */}
+        {/* Empty State */}
         {(activeTab === 'timeline' || activeTab === 'aggregated') && images.length === 0 && (
           <div
             style={{
