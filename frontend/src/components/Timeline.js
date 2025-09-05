@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { COLORS } from './styles/colors';
 import * as d3 from 'd3';
-
 
 const Timeline = ({ images = [], selectedModels = [] }) => {
   const svgRef = useRef(null);
@@ -23,8 +22,19 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     YOLOv10n: '#45B7D1',
   };
 
-  const drawModelLegend = (svg, selectedModels, modelColors) => {
-    if (!selectedModels.length) return;
+  // NEW: derive models purely from returned data
+  const presentModels = useMemo(() => {
+    const set = new Set();
+    images.forEach(img => {
+      if (img && img.models_results) {
+        Object.keys(img.models_results).forEach(m => set.add(m));
+      }
+    });
+    return Array.from(set).sort(); // stable order for legend
+  }, [images]);
+
+  const drawModelLegend = (svg, models, modelColors) => {
+    if (!models.length) return;
 
     const entryH = 15;
     const x = 10;
@@ -32,9 +42,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     const legend = svg.append('g').attr('transform', `translate(${x}, ${y})`);
 
-    selectedModels.forEach((model, i) => {
+    models.forEach((model, i) => {
       const yPos = i * entryH;
-      legend.append('rect')
+      legend
+        .append('rect')
         .attr('x', 0)
         .attr('y', yPos - 8)
         .attr('width', 12)
@@ -42,9 +53,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('fill', modelColors[model] || '#888')
         .attr('opacity', 0.8);
 
-      legend.append('text')
+      legend
+        .append('text')
         .attr('x', 15)
-        .attr('y', yPos - 1) 
+        .attr('y', yPos - 1)
         .style('font-size', '10px')
         .style('fill', '#2c3e50')
         .text(model);
@@ -55,7 +67,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const dataByDay = {};
 
     images.forEach((image) => {
-      if (!image.models_results) return;
+      if (!image?.models_results) return;
 
       const date = new Date(image.timestamp);
       const year = date.getUTCFullYear();
@@ -68,7 +80,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
       if (!dataByDay[dayKey]) dataByDay[dayKey] = [];
 
-      selectedModels.forEach((model) => {
+      // use models that are present in the data (not sidebar selection)
+      presentModels.forEach((model) => {
         if (image.models_results[model]) {
           dataByDay[dayKey].push({
             hour: hourFloat,
@@ -85,16 +98,16 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     });
 
     return dataByDay;
-  }, [images, selectedModels]);
+  }, [images, presentModels]);
 
   const processAggregatedData = useCallback(() => {
-    if (!images.length || !selectedModels.length) return { aggregatedData: [], maxValue: 1 };
+    if (!images.length || !presentModels.length) return { aggregatedData: [], maxValue: 1 };
 
     const buckets = {};
     const period = Math.max(1, Number(aggregationPeriod) || 60);
 
     images.forEach((image) => {
-      if (!image.models_results) return;
+      if (!image?.models_results) return;
 
       const date = new Date(image.timestamp);
       const minutes = date.getUTCMinutes();
@@ -113,13 +126,13 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         buckets[bucketKey] = {
           day: dayKey,
           time: bucketTime,
-          perModel: {}
+          perModel: {},
         };
       }
 
       const hasImage = image.has_image !== false;
 
-      selectedModels.forEach((model) => {
+      presentModels.forEach((model) => {
         const mr = image.models_results[model];
         if (!mr) return;
 
@@ -178,8 +191,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     });
 
     return { aggregatedData, maxValue };
-  }, [images, selectedModels, aggregationType, aggregationPeriod]);
-
+  }, [images, presentModels, aggregationType, aggregationPeriod]);
 
   const handleResize = useCallback(() => {
     if (containerRef.current) {
@@ -200,7 +212,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     } else if (activeTab === 'aggregated') {
       renderAggregatedView();
     }
-  }, [dimensions, images, selectedModels, activeTab, aggregationType, aggregationPeriod, showSavedImage, showInferenceOnly]);
+  // IMPORTANT: exclude selectedModels so sidebar changes don't toggle charts
+  }, [dimensions, images, activeTab, aggregationType, aggregationPeriod, showSavedImage, showInferenceOnly, presentModels]);
 
   const renderTimelineView = () => {
     const dataByDay = processTimelineData();
@@ -223,7 +236,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const yScale = d3.scaleBand().domain(days).range([0, innerHeight]).padding(0.2);
     const thicknessScale = d3
       .scaleLinear()
-      .domain([0, d3.max(Object.values(dataByDay).flat(), (d) => d.totalObjects)])
+      .domain([0, d3.max(Object.values(dataByDay).flat(), (d) => d.totalObjects) || 1])
       .range([8, Math.min(yScale.bandwidth(), 30)]);
 
     g.append('g')
@@ -280,7 +293,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
           .attr('y', yScale(day) + (yScale.bandwidth() - thickness) / 2)
           .attr('width', 4)
           .attr('height', thickness)
-          .attr('fill', modelColors[detection.model])
+          .attr('fill', modelColors[detection.model] || '#888')
           .attr('opacity', detection.hasImage ? 0.8 : 0.6)
           .attr('stroke', detection.hasImage ? 'none' : '#333')
           .attr('stroke-width', detection.hasImage ? 0 : 1)
@@ -371,7 +384,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .attr('fill', 'transparent')
       .on('click', () => setShowInferenceOnly((v) => !v));
 
-    drawModelLegend(svg, selectedModels, modelColors);
+    drawModelLegend(svg, presentModels, modelColors);
   };
 
   const renderAggregatedView = () => {
@@ -459,7 +472,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .style('fill', '#2c3e50')
       .text(`Bar Chart - ${aggregationType} per ${aggregationPeriod}min`);
 
-    const sqrtScale = d3.scaleSqrt().domain([0, maxValue]).range([0, Math.min(yScale.bandwidth() * 0.8, 40)]);
+    const sqrtScale = d3.scaleSqrt().domain([0, maxValue || 1]).range([0, Math.min(yScale.bandwidth() * 0.8, 40)]);
     const BAR_GAP = 2;
     const DEFAULT_BAR_WIDTH = 8;
 
@@ -467,10 +480,9 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const dayData = dataByDay[day];
 
       dayData.forEach((bucket) => {
-        const modelsToPlot = selectedModels.filter(
+        const modelsToPlot = presentModels.filter(
           (m) => bucket.perModelValues[m] && bucket.perModelValues[m].value > 0
         );
-
         if (modelsToPlot.length === 0) return;
 
         const barWidth = Math.max(4, Math.min(DEFAULT_BAR_WIDTH, 28 / modelsToPlot.length));
@@ -520,7 +532,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       });
     });
 
-    drawModelLegend(svg, selectedModels, modelColors);
+    drawModelLegend(svg, presentModels, modelColors);
   };
 
   return (
