@@ -26,9 +26,9 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const drawModelLegend = (svg, selectedModels, modelColors) => {
     if (!selectedModels.length) return;
 
-    const entryH = 15;      // vertical spacing between entries
-    const x = 10;           // left padding
-    const y = MARGIN.top - 30; // <- anchor relative to chart top; adjust +/- to taste
+    const entryH = 15;
+    const x = 10;
+    const y = MARGIN.top - 30;
 
     const legend = svg.append('g').attr('transform', `translate(${x}, ${y})`);
 
@@ -44,7 +44,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
       legend.append('text')
         .attr('x', 15)
-        .attr('y', yPos - 1) // baseline-align with swatch
+        .attr('y', yPos - 1) 
         .style('font-size', '10px')
         .style('fill', '#2c3e50')
         .text(model);
@@ -90,8 +90,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const processAggregatedData = useCallback(() => {
     if (!images.length || !selectedModels.length) return { aggregatedData: [], maxValue: 1 };
 
-    // Buckets keyed by `${dayKey}-${bucketTime}`
-    // Each bucket keeps per-model stats
     const buckets = {};
     const period = Math.max(1, Number(aggregationPeriod) || 60);
 
@@ -115,7 +113,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         buckets[bucketKey] = {
           day: dayKey,
           time: bucketTime,
-          perModel: {} // model -> counters
+          perModel: {}
         };
       }
 
@@ -202,7 +200,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     } else if (activeTab === 'aggregated') {
       renderAggregatedView();
     }
-    // NEW: re-render Timeline when toggles change
   }, [dimensions, images, selectedModels, activeTab, aggregationType, aggregationPeriod, showSavedImage, showInferenceOnly]);
 
   const renderTimelineView = () => {
@@ -272,7 +269,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
 
       dayData.forEach((detection) => {
-        // NEW: respect toggles for Saved Image / Inference Only
         if (detection.hasImage && !showSavedImage) return;
         if (!detection.hasImage && !showInferenceOnly) return;
 
@@ -320,10 +316,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     }
 
-    // --- Legend (click-to-toggle) ---
     const strokeLegend = svg.append('g').attr('transform', `translate(${width - 210}, -15)`);
 
-    // Saved Image item
     const savedGroup = strokeLegend.append('g').attr('transform', `translate(0,0)`).style('cursor', 'pointer');
     savedGroup
       .append('rect')
@@ -340,7 +334,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .style('font-size', '10px')
       .style('fill', showSavedImage ? '#2c3e50' : '#9aa1a6')
       .text('Saved Image');
-    // Invisible hitbox for easier clicking
     savedGroup
       .append('rect')
       .attr('x', -8)
@@ -350,7 +343,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .attr('fill', 'transparent')
       .on('click', () => setShowSavedImage((v) => !v));
 
-    // Inference Only item
     const infGroup = strokeLegend.append('g').attr('transform', `translate(80,0)`).style('cursor', 'pointer');
     infGroup
       .append('rect')
@@ -506,7 +498,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             .attr('stroke-width', 0.5)
             .attr('opacity', 0.85);
 
-          // larger, invisible hitbox for tooltip
           group
             .append('rect')
             .attr('x', x - 2)
