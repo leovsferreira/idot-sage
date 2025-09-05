@@ -13,11 +13,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const [showSavedImage, setShowSavedImage] = useState(true);
   const [showInferenceOnly, setShowInferenceOnly] = useState(true);
 
-  // NEW: per-view model visibility (independent toggles)
   const [hiddenTimelineModels, setHiddenTimelineModels] = useState(new Set());
   const [hiddenAggregatedModels, setHiddenAggregatedModels] = useState(new Set());
 
-  const MARGIN = { top: 80, right: 20, bottom: 20, left: 100 };
+  const MARGIN = { top: 80, right: 54, bottom: 20, left: 100 };
   const TITLE_Y = -30;
 
   const modelColors = {
@@ -26,7 +25,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     YOLOv10n: '#45B7D1',
   };
 
-  // derive models purely from returned data
   const presentModels = useMemo(() => {
     const set = new Set();
     images.forEach(img => {
@@ -37,7 +35,11 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     return Array.from(set).sort();
   }, [images]);
 
-  // --- Legend (clickable) ---
+  const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+
+  const makeTopTickFormatter = (tickVals) => (d) =>
+  d === tickVals[tickVals.length - 1] ? '23:59' : `${d.toString().padStart(2, '0')}:00`;
+
   const drawModelLegend = (svg, models, modelColors, hiddenSet, toggleModel) => {
     if (!models.length) return;
 
@@ -104,7 +106,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         if (!dataByDay[dayKey]) dataByDay[dayKey] = [];
 
         presentModels.forEach((model) => {
-          if (hiddenSet.has(model)) return; // respect per-view toggle
+          if (hiddenSet.has(model)) return; 
           if (image.models_results[model]) {
             dataByDay[dayKey].push({
               hour: hourFloat,
@@ -206,7 +208,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         if (value > maxValue) maxValue = value;
       });
 
-      // keep bucket if any model has non-zero value
       if (Object.values(perModelValues).some((m) => m.value > 0)) {
         aggregatedData.push({
           day: b.day,
@@ -232,7 +233,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [handleResize]);
 
-  // Re-render on per-view hidden sets
   useEffect(() => {
     if (activeTab === 'timeline') {
       renderTimelineView();
@@ -252,7 +252,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     hiddenAggregatedModels,
   ]);
 
-  // helpers to toggle hidden sets immutably
   const toggleTimelineModel = (model) => {
     setHiddenTimelineModels((prev) => {
       const next = new Set(prev);
@@ -287,7 +286,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
     const xScale = d3.scaleLinear().domain([0, 24]).range([0, innerWidth]);
-    // scale thickness based on currently visible data
     const flattenedVisible = Object.values(dataByDay).flat();
     const maxObjects = d3.max(flattenedVisible, (d) => d.totalObjects) || 1;
 
@@ -297,10 +295,13 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .domain([0, maxObjects])
       .range([8, Math.min(yScale.bandwidth(), 30)]);
 
+    const tickVals = d3.range(0, 25, 2);
     g.append('g')
       .attr('class', 'x-axis')
       .call(
-        d3.axisTop(xScale).tickValues(d3.range(0, 25, 2)).tickFormat((d) => `${d.toString().padStart(2, '0')}:00`)
+        d3.axisTop(xScale)
+          .tickValues(tickVals)
+          .tickFormat(makeTopTickFormatter(tickVals))
       )
       .style('font-size', '10px');
 
@@ -347,7 +348,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
         chartContainer
           .append('rect')
-          .attr('x', xScale(detection.hour) - 1)
+          .attr('x', clamp(xScale(detection.hour) - 1, 0, innerWidth - 4))
           .attr('y', yScale(day) + (yScale.bandwidth() - thickness) / 2)
           .attr('width', 4)
           .attr('height', thickness)
@@ -387,7 +388,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     }
 
-    // Saved vs Inference toggle (unchanged)
     const strokeLegend = svg.append('g').attr('transform', `translate(${width - 210}, -15)`);
 
     const savedGroup = strokeLegend.append('g').attr('transform', `translate(0,0)`).style('cursor', 'pointer');
@@ -471,9 +471,14 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const xScale = d3.scaleLinear().domain([0, 24]).range([0, innerWidth]);
     const yScale = d3.scaleBand().domain(days).range([0, innerHeight]).padding(0.2);
 
+    const tickVals = d3.range(0, 25, 2);
     g.append('g')
       .attr('class', 'x-axis')
-      .call(d3.axisTop(xScale).tickValues(d3.range(0, 25, 2)).tickFormat((d) => `${d.toString().padStart(2, '0')}:00`))
+      .call(
+        d3.axisTop(xScale)
+          .tickValues(tickVals)
+          .tickFormat(makeTopTickFormatter(tickVals))
+      )
       .style('font-size', '10px');
 
     g.append('g')
@@ -553,7 +558,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         const groupWidth = modelsToPlot.length * barWidth + (modelsToPlot.length - 1) * BAR_GAP;
 
         const xCenter = xScale(bucket.time);
-        const xStart = xCenter - groupWidth / 2;
+        const xStart = clamp(xCenter - groupWidth / 2, 0, innerWidth - groupWidth);
         const yBaseline = yScale(day) + yScale.bandwidth() / 2;
 
         modelsToPlot.forEach((model, i) => {
