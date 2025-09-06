@@ -10,8 +10,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const [activeTab, setActiveTab] = useState('timeline');
   const [aggregationType, setAggregationType] = useState('sum');
   const [aggregationPeriod, setAggregationPeriod] = useState(60);
-  const [showSavedImage, setShowInferenceOnly] = useState(true); // NOTE: original order preserved below
-  const [showInferenceOnly, setShowSavedImage] = useState(true); // swap back below (keep your state names if you prefer)
+  const [showSavedImage, setShowInferenceOnly] = useState(true); // NOTE: matches your current script
+  const [showInferenceOnly, setShowSavedImage] = useState(true); // NOTE: matches your current script
 
   const [hiddenTimelineModels, setHiddenTimelineModels] = useState(new Set());
   const [hiddenAggregatedModels, setHiddenAggregatedModels] = useState(new Set());
@@ -597,9 +597,12 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .domain([0, maxValue || 1])
       .range([0, Math.min(yScale.bandwidth() * 0.8, 40)]);
 
-    const BAR_GAP = 2;
-    const DEFAULT_BAR_WIDTH = 8;
-    const INNER_PAD = 3; // padding from boundary lines inside each interval
+    // --- Adaptive sizing to prevent overlap ---
+    const BASE_BAR_GAP = 2;   // preferred gap in px
+    const MIN_BAR_GAP = 0;    // can collapse to 0 when tight
+    const MIN_BAR_WIDTH = 1;  // ensure no overlap
+    const MAX_BAR_WIDTH = 8;  // upper cap
+    const INNER_PAD = 3;      // padding from boundary lines
 
     days.forEach((day) => {
       const dayData = dataByDay[day];
@@ -616,34 +619,58 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         // Interval metrics
         const stepH = aggregationPeriod / 60;
         const bucketStartH = bucket.time;             // START
-        const bucketEndH = bucketStartH + stepH;      // END
-        const bucketCenterH = bucketStartH + stepH/2; // CENTER
-
+        const bucketEndH   = bucketStartH + stepH;    // END
         const xBucketStart = xScale(bucketStartH);
         const xBucketEnd   = xScale(bucketEndH);
-        const xCenter      = xScale(bucketCenterH);
         const bucketPixelWidth = xBucketEnd - xBucketStart;
 
-        // Bar widths constrained to interval width
-        const maxBarWidthByInterval =
-          (bucketPixelWidth - 2 * INNER_PAD - (modelsToPlot.length - 1) * BAR_GAP) /
-          Math.max(1, modelsToPlot.length);
+        // Available width inside boundaries
+        const available = Math.max(0, bucketPixelWidth - 2 * INNER_PAD);
 
-        const barWidth = Math.max(4, Math.min(DEFAULT_BAR_WIDTH, maxBarWidthByInterval));
-        const groupWidth = modelsToPlot.length * barWidth + (modelsToPlot.length - 1) * BAR_GAP;
+        const modelsN = Math.max(1, modelsToPlot.length);
 
-        // CENTER the group within the two boundary lines (categorical look)
+        // 1) pick the largest gap we can while keeping MIN_BAR_WIDTH
+        let gap = Math.min(
+          BASE_BAR_GAP,
+          Math.floor((available - modelsN * MIN_BAR_WIDTH) / Math.max(1, modelsN - 1))
+        );
+        gap = Math.max(MIN_BAR_GAP, gap);
+
+        // 2) compute bar width with that gap
+        let barWidth = Math.floor((available - (modelsN - 1) * gap) / modelsN);
+        barWidth = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, barWidth));
+
+        // 3) recompute group, adjust gap if needed
+        let groupWidth = modelsN * barWidth + (modelsN - 1) * gap;
+        if (groupWidth > available) {
+          gap = Math.max(
+            MIN_BAR_GAP,
+            Math.floor((available - modelsN * barWidth) / Math.max(1, modelsN - 1))
+          );
+          groupWidth = modelsN * barWidth + (modelsN - 1) * gap;
+        }
+
+        // 4) if still too wide, shrink bars again
+        if (groupWidth > available) {
+          barWidth = Math.max(
+            MIN_BAR_WIDTH,
+            Math.floor((available - (modelsN - 1) * gap) / modelsN)
+          );
+          groupWidth = modelsN * barWidth + (modelsN - 1) * gap;
+        }
+
+        // CENTER the group within the interval
         const xStart = clamp(
-          xBucketStart + INNER_PAD + (bucketPixelWidth - 2 * INNER_PAD - groupWidth) / 2,
-          0,
-          innerWidth - groupWidth
+          xBucketStart + INNER_PAD + (available - groupWidth) / 2,
+          xBucketStart + INNER_PAD,
+          xBucketEnd - INNER_PAD - groupWidth
         );
         const yBaseline = yScale(day) + yScale.bandwidth() / 2;
 
         modelsToPlot.forEach((model, i) => {
           const stats = bucket.perModelValues[model];
           const h = Math.max(1, sqrtScale(stats.value));
-          const x = xStart + i * (barWidth + BAR_GAP);
+          const x = xStart + i * (barWidth + gap);
 
           const group = chartContainer.append('g');
 
@@ -656,7 +683,8 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             .attr('fill', modelColors[model] || '#888')
             .attr('stroke', '#2c3e50')
             .attr('stroke-width', 0.5)
-            .attr('opacity', 0.85);
+            .attr('opacity', 0.85)
+            .attr('shape-rendering', 'crispEdges');
 
           group
             .append('rect')
