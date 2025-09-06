@@ -36,7 +36,9 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
 
       console.log('Sending query:', queryData);
       const response = await axios.post('/api/query', queryData);
-      
+      console.log('Response status:', response.status);
+      console.log('Response data keys:', Object.keys(response.data));
+      console.log('Success field:', response.data.success);
       if (response.data.success) {
         onQueryResults(response.data.images);
         
@@ -49,6 +51,7 @@ const LateralMenu = ({ activeTab, setActiveTab, onQueryResults, onModelChange, s
         setError(response.data.error || 'Query failed');
       }
     } catch (error) {
+
       console.error('Query error:', error);
       setError(error.response?.data?.error || error.message || 'Network error');
     } finally {

@@ -10,13 +10,13 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const [activeTab, setActiveTab] = useState('timeline');
   const [aggregationType, setAggregationType] = useState('sum');
   const [aggregationPeriod, setAggregationPeriod] = useState(60);
-  const [showSavedImage, setShowSavedImage] = useState(true);
-  const [showInferenceOnly, setShowInferenceOnly] = useState(true);
+  const [showSavedImage, setShowInferenceOnly] = useState(true); // NOTE: original order preserved below
+  const [showInferenceOnly, setShowSavedImage] = useState(true); // swap back below (keep your state names if you prefer)
 
   const [hiddenTimelineModels, setHiddenTimelineModels] = useState(new Set());
   const [hiddenAggregatedModels, setHiddenAggregatedModels] = useState(new Set());
 
-  const MARGIN = { top: 80, right: 54, bottom: 20, left: 100 };
+  const MARGIN = { top: 80, right: 64, bottom: 20, left: 100 };
   const TITLE_Y = -30;
 
   const modelColors = {
@@ -38,7 +38,60 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
   const makeTopTickFormatter = (tickVals) => (d) =>
-  d === tickVals[tickVals.length - 1] ? '23:59' : `${d.toString().padStart(2, '0')}:00`;
+    d === tickVals[tickVals.length - 1] ? '23:59' : `${d.toString().padStart(2, '0')}:00`;
+
+  const hhmmUTC = (d) => d.toISOString().slice(11, 16);
+
+  const bucketWindow = (dayStr, timeFloat, periodMin) => {
+    const [Y, M, D] = dayStr.split('-').map(Number);
+    const h = Math.floor(timeFloat);
+    const m = Math.round((timeFloat - h) * 60);
+    const start = new Date(Date.UTC(Y, M - 1, D, h, m, 0));
+    const end = new Date(start.getTime() + periodMin * 60 * 1000 - 1000);
+    return [start, end];
+  };
+
+  // --- Centered categorical axis helpers ---
+
+  // Build tick CENTERS (not starts), thinned to ~maxLabels
+  const buildTickCenters = (periodMin, maxLabels = 10) => {
+    const stepH = periodMin / 60; // 0.25, 0.5, 1, etc.
+    const half = stepH / 2;
+    const centers = [];
+    for (let c = half; c < 24 - 1e-6; c += stepH) centers.push(+c.toFixed(6));
+    // thin
+    const total = centers.length;
+    const stride = Math.max(1, Math.ceil(total / maxLabels));
+    const thin = centers.filter((_, i) => i % stride === 0);
+    // ensure last center included
+    const lastCenter = +(24 - half).toFixed(6);
+    if (!thin.includes(lastCenter) && lastCenter > 0 && lastCenter < 24) thin.push(lastCenter);
+    return thin;
+  };
+
+  // Format a tick given its CENTER; show "HH:MM–HH:MM"
+  const makeCenteredRangeTickFormatter = (periodMin) => (centerT) => {
+    const stepH = periodMin / 60;
+    const startT = centerT - stepH / 2;
+    const endT = centerT + stepH / 2;
+    const sh = Math.floor(startT);
+    const sm = Math.round((startT - sh) * 60);
+    const eh = Math.floor(endT);
+    const em = Math.round((endT - eh) * 60) - 1; // inclusive end minute
+    const start = new Date(Date.UTC(2000, 0, 1, sh, sm < 0 ? 0 : sm, 0));
+    const end = new Date(Date.UTC(2000, 0, 1, eh, em < 0 ? 0 : em, 59));
+    const hhmm = (d) => d.toISOString().slice(11, 16);
+    return `${hhmm(start)}–${hhmm(end)}`;
+  };
+
+  // Period-aligned vertical boundary positions in "hour" units (0..24), at STARTS
+  const buildBoundaries = (periodMin) => {
+    const stepH = periodMin / 60;
+    const vals = [];
+    for (let t = 0; t <= 24 + 1e-6; t += stepH) vals.push(+t.toFixed(6));
+    if (vals[vals.length - 1] !== 24) vals.push(24);
+    return vals;
+  };
 
   const drawModelLegend = (svg, models, modelColors, hiddenSet, toggleModel) => {
     if (!models.length) return;
@@ -54,7 +107,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const isHidden = hiddenSet.has(model);
       const opacity = isHidden ? 0.25 : 0.9;
 
-      // color swatch
       legend
         .append('rect')
         .attr('x', 0)
@@ -64,7 +116,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('fill', modelColors[model] || '#888')
         .attr('opacity', opacity);
 
-      // label
       legend
         .append('text')
         .attr('x', 16)
@@ -74,7 +125,6 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .style('font-weight', isHidden ? 'normal' : 'bold')
         .text(model);
 
-      // click target
       legend
         .append('rect')
         .attr('x', -4)
@@ -106,7 +156,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         if (!dataByDay[dayKey]) dataByDay[dayKey] = [];
 
         presentModels.forEach((model) => {
-          if (hiddenSet.has(model)) return; 
+          if (hiddenSet.has(model)) return;
           if (image.models_results[model]) {
             dataByDay[dayKey].push({
               hour: hourFloat,
@@ -141,7 +191,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       const hours = date.getUTCHours();
 
       const bucketMinutes = Math.floor(minutes / period) * period;
-      const bucketTime = +(hours + bucketMinutes / 60).toFixed(2);
+      const bucketTime = +(hours + bucketMinutes / 60).toFixed(2); // START of interval
 
       const year = date.getUTCFullYear();
       const month = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -211,7 +261,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       if (Object.values(perModelValues).some((m) => m.value > 0)) {
         aggregatedData.push({
           day: b.day,
-          time: b.time,
+          time: b.time, // START
           perModelValues,
         });
       }
@@ -375,6 +425,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       });
     });
 
+    // (Timeline view keeps its 4-hour vertical grid)
     for (let hour = 0; hour <= 24; hour += 4) {
       chartContainer
         .append('line')
@@ -471,13 +522,14 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
     const xScale = d3.scaleLinear().domain([0, 24]).range([0, innerWidth]);
     const yScale = d3.scaleBand().domain(days).range([0, innerHeight]).padding(0.2);
 
-    const tickVals = d3.range(0, 25, 2);
+    // Categorical-like axis: ticks at CENTERS, labels show range
+    const tickCenters = buildTickCenters(aggregationPeriod, 10);
     g.append('g')
       .attr('class', 'x-axis')
       .call(
         d3.axisTop(xScale)
-          .tickValues(tickVals)
-          .tickFormat(makeTopTickFormatter(tickVals))
+          .tickValues(tickCenters)
+          .tickFormat(makeCenteredRangeTickFormatter(aggregationPeriod))
       )
       .style('font-size', '10px');
 
@@ -502,6 +554,7 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
 
     const chartContainer = g.append('g');
 
+    // Horizontal day separators
     days.forEach((day) => {
       chartContainer
         .append('line')
@@ -515,18 +568,20 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         .attr('opacity', 0.6);
     });
 
-    for (let hour = 0; hour <= 24; hour += 4) {
+    // Period-aligned vertical boundaries at STARTS (two lines per interval)
+    const boundaries = buildBoundaries(aggregationPeriod);
+    boundaries.forEach((b) => {
       chartContainer
         .append('line')
-        .attr('x1', xScale(hour))
-        .attr('x2', xScale(hour))
+        .attr('x1', xScale(b))
+        .attr('x2', xScale(b))
         .attr('y1', 0)
         .attr('y2', innerHeight)
         .attr('stroke', '#e1e4ebff')
         .attr('stroke-width', 1)
         .attr('stroke-dasharray', '4,4')
         .attr('opacity', 0.6);
-    }
+    });
 
     g.append('text')
       .attr('x', innerWidth / 2)
@@ -537,15 +592,19 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
       .style('fill', '#2c3e50')
       .text(`Bar Chart - ${aggregationType} per ${aggregationPeriod}min`);
 
-    const sqrtScale = d3.scaleSqrt().domain([0, maxValue || 1]).range([0, Math.min(yScale.bandwidth() * 0.8, 40)]);
+    const sqrtScale = d3
+      .scaleSqrt()
+      .domain([0, maxValue || 1])
+      .range([0, Math.min(yScale.bandwidth() * 0.8, 40)]);
+
     const BAR_GAP = 2;
     const DEFAULT_BAR_WIDTH = 8;
+    const INNER_PAD = 3; // padding from boundary lines inside each interval
 
     days.forEach((day) => {
       const dayData = dataByDay[day];
 
       dayData.forEach((bucket) => {
-        // respect per-view hidden models for AGGREGATED
         const modelsToPlot = presentModels.filter(
           (m) =>
             !hiddenAggregatedModels.has(m) &&
@@ -554,11 +613,31 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
         );
         if (modelsToPlot.length === 0) return;
 
-        const barWidth = Math.max(4, Math.min(DEFAULT_BAR_WIDTH, 28 / modelsToPlot.length));
+        // Interval metrics
+        const stepH = aggregationPeriod / 60;
+        const bucketStartH = bucket.time;             // START
+        const bucketEndH = bucketStartH + stepH;      // END
+        const bucketCenterH = bucketStartH + stepH/2; // CENTER
+
+        const xBucketStart = xScale(bucketStartH);
+        const xBucketEnd   = xScale(bucketEndH);
+        const xCenter      = xScale(bucketCenterH);
+        const bucketPixelWidth = xBucketEnd - xBucketStart;
+
+        // Bar widths constrained to interval width
+        const maxBarWidthByInterval =
+          (bucketPixelWidth - 2 * INNER_PAD - (modelsToPlot.length - 1) * BAR_GAP) /
+          Math.max(1, modelsToPlot.length);
+
+        const barWidth = Math.max(4, Math.min(DEFAULT_BAR_WIDTH, maxBarWidthByInterval));
         const groupWidth = modelsToPlot.length * barWidth + (modelsToPlot.length - 1) * BAR_GAP;
 
-        const xCenter = xScale(bucket.time);
-        const xStart = clamp(xCenter - groupWidth / 2, 0, innerWidth - groupWidth);
+        // CENTER the group within the two boundary lines (categorical look)
+        const xStart = clamp(
+          xBucketStart + INNER_PAD + (bucketPixelWidth - 2 * INNER_PAD - groupWidth) / 2,
+          0,
+          innerWidth - groupWidth
+        );
         const yBaseline = yScale(day) + yScale.bandwidth() / 2;
 
         modelsToPlot.forEach((model, i) => {
@@ -587,9 +666,10 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
             .attr('height', h + 4)
             .attr('fill', 'transparent')
             .on('mouseover', (event) => {
+              const [winStart, winEnd] = bucketWindow(bucket.day, bucket.time, aggregationPeriod);
               const content =
                 `Model: ${model}\n` +
-                `Time: ${bucket.time.toFixed(2)}h\n` +
+                `Time: ${hhmmUTC(winStart)}–${hhmmUTC(winEnd)}\n` +
                 `Value: ${stats.value} (${aggregationType})\n` +
                 `With Images: ${stats.withImagesCount} inferences, ${stats.withImagesObjects} objects\n` +
                 `Inference Only: ${stats.inferenceOnlyCount} inferences, ${stats.inferenceOnlyObjects} objects\n` +
