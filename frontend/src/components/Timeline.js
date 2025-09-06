@@ -66,13 +66,11 @@ const Timeline = ({ images = [], selectedModels = [] }) => {
   const makeCenteredRangeTickFormatter = (periodMin) => (centerT) => {
     const stepH = periodMin / 60;
     const startT = centerT - stepH / 2;
-    const endT = centerT + stepH / 2;
-    const sh = Math.floor(startT);
-    const sm = Math.round((startT - sh) * 60);
-    const eh = Math.floor(endT);
-    const em = Math.round((endT - eh) * 60) - 1;
-    const start = new Date(Date.UTC(2000, 0, 1, sh, sm < 0 ? 0 : sm, 0));
-    const end = new Date(Date.UTC(2000, 0, 1, eh, em < 0 ? 0 : em, 59));
+    const baseMs = Date.UTC(2000, 0, 1, 0, 0, 0);
+    const startMs = baseMs + Math.round(startT * 60) * 60 * 1000;
+    const endMs = startMs + periodMin * 60 * 1000 - 1000;
+    const start = new Date(startMs);
+    const end = new Date(endMs);
     const hhmm = (d) => d.toISOString().slice(11, 16);
     return `${hhmm(start)}–${hhmm(end)}`;
   };
